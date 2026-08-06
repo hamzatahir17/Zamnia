@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.*
 
 class ZamniaRepository(
     private val supabase: SupabaseService,
+    private val database: com.zamnia.quizapp.data.local.ZamniaDatabase,
     private val packageDao: PackageDao,
     private val quizDao: QuizDao,
     private val userDao: UserDao,
@@ -24,33 +25,51 @@ class ZamniaRepository(
             entity?.let {
                 User(
                     uid = it.userId,
+                    userId = it.publicId,
                     displayName = it.name,
                     email = it.email,
                     coinBalance = it.coins,
                     activeThemeId = it.activeThemeId
                 )
             }
-        }
+        }.distinctUntilChanged()
         
         val remoteFlow = supabase.getUserProfileStream(uid)
-            .onEach { user ->
-                if (user != null) {
-                    userDao.insertUser(
-                        UserEntity(
-                            userId = user.uid,
-                            name = user.displayName,
-                            email = user.email,
-                            coins = user.coinBalance,
-                            activeThemeId = user.activeThemeId
+            .distinctUntilChanged()
+            .onEach { remoteUser ->
+                if (remoteUser != null) {
+                    val localUser = userDao.getUserById(uid).firstOrNull()
+                    // Update local database only if remote data is different to prevent redundant write-trigger loops
+                    if (localUser == null || 
+                        localUser.name != remoteUser.displayName ||
+                        localUser.coins != remoteUser.coinBalance ||
+                        localUser.activeThemeId != remoteUser.activeThemeId ||
+                        localUser.publicId != remoteUser.userId) {
+                        
+                        userDao.insertUser(
+                            UserEntity(
+                                userId = remoteUser.uid,
+                                publicId = remoteUser.userId,
+                                name = remoteUser.displayName,
+                                email = remoteUser.email,
+                                coins = remoteUser.coinBalance,
+                                activeThemeId = remoteUser.activeThemeId
+                            )
                         )
-                    )
+                    }
                 }
             }
-            .catch { }
+            .catch { /* ignore remote errors in stream */ }
 
         emitAll(combine(localFlow, remoteFlow) { local, remote ->
             remote ?: local
-        })
+        }.distinctUntilChanged())
+    }
+
+    suspend fun clearAllLocalData() {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            database.clearAllTables()
+        }
     }
 
     suspend fun saveUserProfile(user: User) {
@@ -58,6 +77,7 @@ class ZamniaRepository(
         userDao.insertUser(
             UserEntity(
                 userId = user.uid,
+                publicId = user.userId,
                 name = user.displayName,
                 email = user.email,
                 coins = user.coinBalance,
@@ -83,6 +103,7 @@ class ZamniaRepository(
         return userDao.getUserById(uid).firstOrNull()?.let {
             User(
                 uid = it.userId,
+                userId = it.publicId,
                 displayName = it.name,
                 email = it.email,
                 coinBalance = it.coins,
@@ -118,9 +139,13 @@ class ZamniaRepository(
         }
     }
 
-    suspend fun transferCoins(toPublicId: String, amount: Long): Result<Unit> {
-        val fromUid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return Result.failure(Exception("Not logged in"))
-        return supabase.transferCoins(fromUid, toPublicId, amount)
+    suspend fun transferCoins(toPublicId: String, amount: Long): String {
+        return supabase.transferCoinsRpc(toPublicId, amount)
+    }
+
+    suspend fun getDailyTransferCount(): Int {
+        val uid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return 0
+        return supabase.getDailyTransferCount(uid)
     }
 
     suspend fun getUserByPublicId(publicId: String): User? = supabase.getUserByPublicId(publicId)
@@ -136,6 +161,9 @@ class ZamniaRepository(
     suspend fun getAvailablePacks(classLevel: Int): List<Pack> = supabase.getAvailablePacks(classLevel)
 
     suspend fun syncAndCleanupPacks() {
+        // Ensure user is authenticated before syncing
+        if (com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull() == null) return
+        
         try {
             val result = supabase.getAvailablePacksForAllClasses()
             if (result.isSuccess) {
@@ -143,14 +171,14 @@ class ZamniaRepository(
                 val validIds = remotePacks.map { it.id }
                 
                 if (validIds.isEmpty()) {
-                    // If server is empty, wipe all local downloaded packages
+                    // If the server returns no packs, we wipe local cache to stay in sync
                     packageDao.cleanupAllPackages()
                 } else {
                     packageDao.cleanupDeletedPackages(validIds)
                 }
             }
         } catch (e: Exception) {
-            android.util.Log.e("ZamniaRepository", "Cleanup failed: ${e.message}")
+            android.util.Log.e("ZamniaRepository", "Sync cleanup failed: ${e.message}")
         }
     }
 

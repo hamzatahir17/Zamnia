@@ -7,7 +7,7 @@ import kotlinx.serialization.SerialName
 data class User(
     val uid: String = "",
     @SerialName("user_id")
-    val userId: String = "", 
+    val userId: String? = null, // Nullable to allow Database DEFAULT generation
     val email: String = "",
     @SerialName("display_name")
     val displayName: String = "",

@@ -8,6 +8,8 @@ import com.zamnia.quizapp.data.model.User
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 import android.content.Context
@@ -22,6 +24,9 @@ import io.github.jan.supabase.auth.providers.Google
 class AuthViewModel : ViewModel() {
     private val client = ZamniaEngine.supabase
     private val repository = ZamniaEngine.repository
+
+    val isOnline: StateFlow<Boolean> = ZamniaEngine.networkObserver.isOnline
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
@@ -59,7 +64,8 @@ class AuthViewModel : ViewModel() {
                     if (existingProfile == null) {
                         val user = User(
                             uid = uid,
-                            userId = (100000..999999).random().toString(),
+                            // userId is null so Supabase can generate it automatically
+                            userId = null, 
                             email = client.auth.currentUserOrNull()?.email ?: "",
                             displayName = "Explorer",
                             coinBalance = 0L
@@ -91,7 +97,8 @@ class AuthViewModel : ViewModel() {
                 if (existingProfile == null) {
                     val guestUser = User(
                         uid = uid,
-                        userId = (100000..999999).random().toString(),
+                        // userId is null so Supabase can generate it automatically
+                        userId = null, 
                         email = "guest@zamnia.com",
                         displayName = "Guest Explorer",
                         coinBalance = 0L
@@ -136,12 +143,30 @@ class AuthViewModel : ViewModel() {
 
     fun logout() {
         viewModelScope.launch {
-            client.auth.signOut()
-            _authState.value = AuthState.Idle
+            _authState.value = AuthState.Loading
+            try {
+                // Clear local data on background thread BEFORE signing out
+                repository.clearAllLocalData()
+                
+                // Sign out from Supabase
+                client.auth.signOut()
+                
+                // Small delay to ensure the session is fully cleared before UI updates
+                kotlinx.coroutines.delay(500)
+            } catch (e: Exception) {
+                android.util.Log.e("AuthViewModel", "Logout error: ${e.message}")
+            } finally {
+                // Set explicitly to LoggedOut to trigger navigation in UI
+                _authState.value = AuthState.LoggedOut
+            }
         }
     }
 
     fun clearError() {
+        _authState.value = AuthState.Idle
+    }
+
+    fun resetAuthState() {
         _authState.value = AuthState.Idle
     }
 }
@@ -150,5 +175,6 @@ sealed class AuthState {
     object Idle : AuthState()
     object Loading : AuthState()
     object Success : AuthState()
+    object LoggedOut : AuthState()
     data class Error(val message: String) : AuthState()
 }

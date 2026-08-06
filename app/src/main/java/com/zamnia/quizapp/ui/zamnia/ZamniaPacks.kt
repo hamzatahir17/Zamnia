@@ -62,7 +62,29 @@ fun ZamniaPacksScreen(
     Scaffold(
         topBar = {
             if (navLevel == PacksNavigationLevel.CLASSES) {
-                ZamniaHeader(coins = 1250L, onProfileClick = onNavigateToSettings)
+                TopAppBar(
+                    title = {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Hub,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(32.dp)
+                            )
+                            Text(
+                                text = "Zamnia",
+                                style = MaterialTheme.typography.headlineSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.8f)
+                    )
+                )
             } else {
                 TopAppBar(
                     title = { 

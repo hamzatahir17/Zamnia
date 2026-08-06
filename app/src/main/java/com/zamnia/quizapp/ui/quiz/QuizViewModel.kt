@@ -39,6 +39,9 @@ class QuizViewModel : ViewModel() {
     private val _coinsEarned = MutableStateFlow(0)
     val coinsEarned: StateFlow<Int> = _coinsEarned.asStateFlow()
 
+    val isOnline: StateFlow<Boolean> = ZamniaEngine.networkObserver.isOnline
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
     private val _isFinished = MutableStateFlow(false)
     val isFinished: StateFlow<Boolean> = _isFinished.asStateFlow()
 
@@ -53,7 +56,9 @@ class QuizViewModel : ViewModel() {
         customTimerValue = customTimer
         currentPackageId = packageId
         _hasNoQuestions.value = false
+        _isFinished.value = false // Reset synchronously to prevent navigation loops
         _quizResponses.value = emptyList()
+        _questions.value = emptyList() // Clear old questions immediately
         
         viewModelScope.launch {
             repository.saveCustomTimer(customTimer)
@@ -83,7 +88,8 @@ class QuizViewModel : ViewModel() {
                 if (remoteQuestions.isEmpty()) {
                     _hasNoQuestions.value = true
                 } else {
-                    _questions.value = remoteQuestions
+                    // Limit to 20 random questions even for general mode
+                    _questions.value = remoteQuestions.shuffled().take(20)
                     resetAndStart()
                 }
             }
@@ -127,13 +133,19 @@ class QuizViewModel : ViewModel() {
 
         if (isCorrect) {
             _score.value++
-            _coinsEarned.value += 10
+            if (isOnline.value) {
+                _coinsEarned.value += 10
+            }
         } else {
-            _coinsEarned.value -= 5
+            if (isOnline.value) {
+                _coinsEarned.value -= 5
+            }
         }
 
         viewModelScope.launch {
-            repository.submitQuizAnswer(isCorrect)
+            if (isOnline.value) {
+                repository.submitQuizAnswer(isCorrect)
+            }
             
             currentPackageId?.let { pkgId ->
                 repository.saveQuestionProgress(currentQuestion.id.toString(), pkgId, isCorrect)

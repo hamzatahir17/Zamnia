@@ -6,6 +6,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
@@ -20,17 +22,17 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zamnia.quizapp.ui.wallet.TransferState
 import com.zamnia.quizapp.ui.wallet.WalletViewModel
 import com.zamnia.quizapp.ui.dashboard.DashboardViewModel
+import com.zamnia.quizapp.ui.auth.AuthViewModel
 import com.zamnia.quizapp.ui.zamnia.components.ZamniaBottomNavigation
-import com.zamnia.quizapp.ui.zamnia.components.ZamniaHeader
 import com.zamnia.quizapp.ui.zamnia.components.ZamniaTextField
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ZamniaWalletScreen(
     onBack: () -> Unit,
@@ -38,32 +40,84 @@ fun ZamniaWalletScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToPacks: () -> Unit,
     walletViewModel: WalletViewModel = viewModel(),
-    dashboardViewModel: DashboardViewModel = viewModel()
+    dashboardViewModel: DashboardViewModel = viewModel(),
+    authViewModel: AuthViewModel = viewModel()
 ) {
-    var friendId by remember { mutableStateOf("") }
-    var amount by remember { mutableStateOf("") }
-    
     val userProfile by dashboardViewModel.userProfile.collectAsState()
     val transferState by walletViewModel.transferState.collectAsState()
     val recipientUser by walletViewModel.recipientUser.collectAsState()
+    val remainingTransfers by walletViewModel.remainingTransfers.collectAsState()
+    val isOnline by authViewModel.isOnline.collectAsState()
+
+    // Automatically refresh wallet data when screen opens or internet comes back
+    LaunchedEffect(isOnline) {
+        if (isOnline) {
+            walletViewModel.refreshWallet()
+        }
+    }
+
+    ZamniaWalletContent(
+        userProfile = userProfile,
+        transferState = transferState,
+        recipientUser = recipientUser,
+        remainingTransfers = remainingTransfers,
+        isOnline = isOnline,
+        onBack = onBack,
+        onNavigateToHub = onNavigateToHub,
+        onNavigateToSettings = onNavigateToSettings,
+        onNavigateToPacks = onNavigateToPacks,
+        onFindRecipient = { walletViewModel.findRecipient(it) },
+        onTransferCoins = { id, amt -> walletViewModel.transferCoins(id, amt) }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun ZamniaWalletContent(
+    userProfile: com.zamnia.quizapp.data.model.User?,
+    transferState: TransferState,
+    recipientUser: com.zamnia.quizapp.data.model.User?,
+    remainingTransfers: Int,
+    isOnline: Boolean,
+    onBack: () -> Unit,
+    onNavigateToHub: () -> Unit,
+    onNavigateToSettings: () -> Unit,
+    onNavigateToPacks: () -> Unit,
+    onFindRecipient: (String) -> Unit,
+    onTransferCoins: (String, Long) -> Unit
+) {
+    var friendId by remember { mutableStateOf("") }
+    var amount by remember { mutableStateOf("") }
 
     LaunchedEffect(friendId) {
         if (friendId.length == 6) {
-            walletViewModel.findRecipient(friendId)
+            onFindRecipient(friendId)
         }
     }
 
     Scaffold(
         topBar = {
             TopAppBar(
-                title = { Text("Zamnia Wallet", style = MaterialTheme.typography.titleMedium) },
-                navigationIcon = {
-                    IconButton(onClick = onBack) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = null)
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Hub,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Text(
+                            text = "Zamnia",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
                     }
                 },
                 colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.6f)
+                    containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.8f)
                 )
             )
         },
@@ -82,9 +136,12 @@ fun ZamniaWalletScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
-                .padding(20.dp),
+                .padding(horizontal = 20.dp)
+                .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(24.dp)
         ) {
+            Spacer(modifier = Modifier.height(8.dp))
+
             // Balance Card
             Card(
                 modifier = Modifier.fillMaxWidth(),
@@ -127,8 +184,11 @@ fun ZamniaWalletScreen(
                                     verticalAlignment = Alignment.CenterVertically,
                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
-                                    Box(modifier = Modifier.size(8.dp).background(MaterialTheme.colorScheme.tertiary, CircleShape))
-                                    Text(text = "Live", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.tertiary)
+                                    val statusColor = if (isOnline) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.error
+                                    val statusText = if (isOnline) "Live" else "Offline"
+                                    
+                                    Box(modifier = Modifier.size(8.dp).background(statusColor, CircleShape))
+                                    Text(text = statusText, style = MaterialTheme.typography.labelSmall, color = statusColor)
                                 }
                             }
                         }
@@ -145,7 +205,7 @@ fun ZamniaWalletScreen(
                                 modifier = Modifier.size(36.dp)
                             )
                             Text(
-                                text = userProfile?.coinBalance?.toString() ?: "0",
+                                text = if (isOnline) (userProfile?.coinBalance?.toString() ?: "0") else "---",
                                 style = MaterialTheme.typography.displayMedium,
                                 fontWeight = FontWeight.ExtraBold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -164,8 +224,9 @@ fun ZamniaWalletScreen(
                                 tint = MaterialTheme.colorScheme.outline,
                                 modifier = Modifier.size(18.dp)
                             )
+                            val used = 2 - remainingTransfers
                             Text(
-                                text = "Daily Limit: 2 Transfers remaining",
+                                text = "Today's Limit: $used/2 used ($remainingTransfers remaining)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.outline
                             )
@@ -253,13 +314,15 @@ fun ZamniaWalletScreen(
                     }
                     
                     if (isFound) {
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Text(
-                            text = recipientUser?.displayName ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
+                        if (recipientUser != null) {
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Text(
+                                text = recipientUser.displayName,
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
                     }
                 }
             }
@@ -273,13 +336,11 @@ fun ZamniaWalletScreen(
                 )
             }
 
-            Spacer(modifier = Modifier.weight(1f))
-            
             // Transfer Button
             Button(
                 onClick = { 
                     val coins = amount.toLongOrNull() ?: 0L
-                    walletViewModel.transferCoins(friendId, coins)
+                    onTransferCoins(friendId, coins)
                 },
                 modifier = Modifier
                     .fillMaxWidth()
@@ -288,7 +349,11 @@ fun ZamniaWalletScreen(
                     containerColor = if (transferState is TransferState.Success) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary
                 ),
                 shape = CircleShape,
-                enabled = transferState !is TransferState.Loading && recipientUser != null && amount.isNotEmpty()
+                enabled = isOnline && 
+                          remainingTransfers > 0 && 
+                          transferState !is TransferState.Loading && 
+                          recipientUser != null && 
+                          amount.isNotEmpty()
             ) {
                 when (transferState) {
                     is TransferState.Loading -> {
@@ -310,6 +375,28 @@ fun ZamniaWalletScreen(
                     }
                 }
             }
+            
+            Spacer(modifier = Modifier.height(32.dp)) // Safe space at bottom
         }
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF0F131D)
+@Composable
+fun WalletPreview() {
+    com.zamnia.quizapp.ui.theme.ZamniaTheme {
+        ZamniaWalletContent(
+            userProfile = com.zamnia.quizapp.data.model.User("1", "482910", "hamza@zamnia.com", "Hamza Explorer", 1250L),
+            transferState = TransferState.Idle,
+            recipientUser = null,
+            remainingTransfers = 2,
+            isOnline = true,
+            onBack = {},
+            onNavigateToHub = {},
+            onNavigateToSettings = {},
+            onNavigateToPacks = {},
+            onFindRecipient = {},
+            onTransferCoins = { _, _ -> }
+        )
     }
 }

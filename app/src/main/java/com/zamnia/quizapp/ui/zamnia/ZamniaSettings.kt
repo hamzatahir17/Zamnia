@@ -18,31 +18,68 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.widget.Toast
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zamnia.quizapp.data.model.Theme
 import com.zamnia.quizapp.ui.settings.SettingsViewModel
 import com.zamnia.quizapp.ui.zamnia.components.ZamniaBottomNavigation
-import com.zamnia.quizapp.ui.zamnia.components.ZamniaHeader
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ZamniaSettingsScreen(
     onNavigateToHub: () -> Unit,
     onNavigateToWallet: () -> Unit,
     onNavigateToPacks: () -> Unit,
     onLogout: () -> Unit,
-    viewModel: SettingsViewModel = viewModel()
+    viewModel: SettingsViewModel = viewModel(),
+    authViewModel: com.zamnia.quizapp.ui.auth.AuthViewModel = viewModel()
 ) {
     val userProfile by viewModel.userProfile.collectAsState()
     val availableThemes by viewModel.availableThemes.collectAsState()
+    val authState by authViewModel.authState.collectAsState()
+
+    // Handle logout navigation after state change
+    androidx.compose.runtime.LaunchedEffect(authState) {
+        if (authState is com.zamnia.quizapp.ui.auth.AuthState.LoggedOut) {
+            onLogout()
+        }
+    }
 
     Scaffold(
-        topBar = { ZamniaHeader(coins = userProfile?.coinBalance ?: 0L, onProfileClick = {}) },
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Hub,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Text(
+                            text = "Zamnia",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.8f)
+                )
+            )
+        },
         bottomBar = { 
             ZamniaBottomNavigation(
                 currentRoute = "settings",
@@ -86,8 +123,7 @@ fun ZamniaSettingsScreen(
             item {
                 Button(
                     onClick = { 
-                        viewModel.logout()
-                        onLogout()
+                        authViewModel.logout()
                     },
                     modifier = Modifier.fillMaxWidth().padding(vertical = 16.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f)),
@@ -104,6 +140,9 @@ fun ZamniaSettingsScreen(
 
 @Composable
 fun ProfileHeaderCard(name: String, email: String, publicId: String) {
+    val clipboardManager = LocalClipboardManager.current
+    val context = LocalContext.current
+
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
@@ -143,7 +182,12 @@ fun ProfileHeaderCard(name: String, email: String, publicId: String) {
             Surface(
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 shape = CircleShape,
-                onClick = { }
+                onClick = { 
+                    if (publicId != "------") {
+                        clipboardManager.setText(AnnotatedString(publicId))
+                        Toast.makeText(context, "ID Copied to Clipboard", Toast.LENGTH_SHORT).show()
+                    }
+                }
             ) {
                 Row(
                     modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
