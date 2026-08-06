@@ -33,16 +33,13 @@ class SupabaseService(private val client: SupabaseClient) {
     }
 
     suspend fun getUserProfile(uid: String): User? {
-        return try {
-            client.postgrest["users"].select {
-                filter {
-                    eq("uid", uid)
-                }
-            }.decodeSingleOrNull<User>()
-        } catch (e: Exception) {
-            Log.e("SupabaseService", "Error getting user profile: ${e.message}")
-            null
-        }
+        // We remove the internal try-catch here so that repository 
+        // can distinguish between "User Not Found" and "Network Error"
+        return client.postgrest["users"].select {
+            filter {
+                eq("uid", uid)
+            }
+        }.decodeSingleOrNull<User>()
     }
 
     suspend fun saveUserProfile(user: User) {

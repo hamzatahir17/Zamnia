@@ -56,7 +56,6 @@ object ZamniaEngine {
             packageDao = database.packageDao(),
             quizDao = database.quizDao(),
             userDao = database.userDao(),
-            syncDao = database.syncDao(),
             userPrefsDao = database.userPrefsDao()
         )
     }

@@ -95,19 +95,39 @@ fun ZamniaPacksScreen(
         containerColor = MaterialTheme.colorScheme.background
     ) { innerPadding ->
         Box(modifier = Modifier.padding(innerPadding)) {
+            // Merge online packs with local downloaded ones to ensure something is always shown
+            val displayPacks = remember(availablePacks, downloadedPacks) {
+                if (availablePacks.isEmpty()) {
+                    // Create minimal Pack objects from downloaded entities if offline
+                    downloadedPacks.map { entity ->
+                        com.zamnia.quizapp.data.model.Pack(
+                            id = entity.packageId,
+                            title = entity.chapterName,
+                            subject = entity.subject,
+                            classLevel = entity.classLevel,
+                            questionCount = "${entity.totalMcqs} Qs",
+                            colorHex = "#D0BCFF",
+                            iconName = "Book"
+                        )
+                    }
+                } else {
+                    availablePacks
+                }
+            }
+
             when (navLevel) {
                 PacksNavigationLevel.CLASSES -> {
                     ClassSelectionList(onClassSelected = { viewModel.selectClass(it) })
                 }
                 PacksNavigationLevel.SUBJECTS -> {
-                    val subjects = availablePacks.map { it.subject }.distinct()
+                    val subjects = displayPacks.map { it.subject }.distinct()
                     SubjectSelectionList(
                         subjects = subjects,
                         onSubjectSelected = { viewModel.selectSubject(it) }
                     )
                 }
                 PacksNavigationLevel.CHAPTERS -> {
-                    val chapters = availablePacks.filter { it.subject == selectedSubject }
+                    val chapters = displayPacks.filter { it.subject == selectedSubject }
                     ChapterList(
                         chapters = chapters,
                         downloadedPacks = downloadedPacks,
