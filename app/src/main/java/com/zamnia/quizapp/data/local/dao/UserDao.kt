@@ -17,4 +17,7 @@ interface UserDao {
 
     @Query("UPDATE users_local SET coins = coins + :amount WHERE userId = :userId")
     suspend fun updateCoins(userId: String, amount: Long)
+
+    @Query("DELETE FROM users_local WHERE userId = :userId")
+    suspend fun deleteUserById(userId: String)
 }
