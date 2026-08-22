@@ -18,10 +18,10 @@ class ZamniaRepository(
     private val userPrefsDao: UserPrefsDao
 ) {
     // --- User Profile & Coins ---
-    fun getUserProfileStream(): Flow<User?> = flow {
-        val uid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return@flow emit(null)
+    fun getUserProfileStream(): Flow<User?> {
+        val uid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return flowOf(null)
         
-        val localFlow = userDao.getUserById(uid).map { entity ->
+        return userDao.getUserById(uid).map { entity ->
             entity?.let {
                 User(
                     uid = it.userId,
@@ -33,37 +33,6 @@ class ZamniaRepository(
                 )
             }
         }.distinctUntilChanged()
-        
-        val remoteFlow = supabase.getUserProfileStream(uid)
-            .distinctUntilChanged()
-            .onEach { remoteUser ->
-                if (remoteUser != null) {
-                    val localUser = userDao.getUserById(uid).firstOrNull()
-                    // Update local database only if remote data is different to prevent redundant write-trigger loops
-                    if (localUser == null || 
-                        localUser.name != remoteUser.displayName ||
-                        localUser.coins != remoteUser.coinBalance ||
-                        localUser.activeThemeId != remoteUser.activeThemeId ||
-                        localUser.publicId != remoteUser.userId) {
-                        
-                        userDao.insertUser(
-                            UserEntity(
-                                userId = remoteUser.uid,
-                                publicId = remoteUser.userId,
-                                name = remoteUser.displayName,
-                                email = remoteUser.email,
-                                coins = remoteUser.coinBalance,
-                                activeThemeId = remoteUser.activeThemeId
-                            )
-                        )
-                    }
-                }
-            }
-            .catch { /* ignore remote errors in stream */ }
-
-        emitAll(combine(localFlow, remoteFlow) { local, remote ->
-            remote ?: local
-        }.distinctUntilChanged())
     }
 
     suspend fun clearAllLocalData() {
