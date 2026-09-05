@@ -12,6 +12,12 @@ interface UserDao {
     @Query("SELECT * FROM users_local WHERE userId = :userId")
     fun getUserById(userId: String): Flow<UserEntity?>
 
+    @Query("SELECT * FROM users_local")
+    fun getAllUsersFlow(): Flow<List<UserEntity>>
+
+    @Query("SELECT * FROM users_local LIMIT 1")
+    suspend fun getAnyUserSync(): UserEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertUser(user: UserEntity)
 

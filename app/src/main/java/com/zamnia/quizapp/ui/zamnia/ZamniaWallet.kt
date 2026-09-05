@@ -1,5 +1,6 @@
 package com.zamnia.quizapp.ui.zamnia
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -27,12 +28,15 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.zamnia.quizapp.data.model.User
 import com.zamnia.quizapp.ui.wallet.TransferState
 import com.zamnia.quizapp.ui.wallet.WalletViewModel
 import com.zamnia.quizapp.ui.dashboard.DashboardViewModel
 import com.zamnia.quizapp.ui.auth.AuthViewModel
+import com.zamnia.quizapp.ui.theme.ZamniaTheme
 import com.zamnia.quizapp.ui.zamnia.components.ZamniaBottomNavigation
 import com.zamnia.quizapp.ui.zamnia.components.ZamniaTextField
+import kotlinx.coroutines.delay
 
 @Composable
 fun ZamniaWalletScreen(
@@ -41,10 +45,11 @@ fun ZamniaWalletScreen(
     onNavigateToSettings: () -> Unit,
     onNavigateToPacks: () -> Unit,
     walletViewModel: WalletViewModel = viewModel(),
-    dashboardViewModel: DashboardViewModel = viewModel(),
     authViewModel: AuthViewModel = viewModel()
 ) {
-    val userProfile by dashboardViewModel.userProfile.collectAsState()
+    val userProfile by walletViewModel.userProfile.collectAsState()
+    val friendId by walletViewModel.friendId.collectAsState()
+    val amount by walletViewModel.amount.collectAsState()
     val transferState by walletViewModel.transferState.collectAsState()
     val recipientUser by walletViewModel.recipientUser.collectAsState()
     val remainingTransfers by walletViewModel.remainingTransfers.collectAsState()
@@ -57,8 +62,17 @@ fun ZamniaWalletScreen(
         }
     }
 
+    // Reset screen state cleanly when leaving the wallet tab
+    DisposableEffect(Unit) {
+        onDispose {
+            walletViewModel.resetState()
+        }
+    }
+
     ZamniaWalletContent(
         userProfile = userProfile,
+        friendId = friendId,
+        amount = amount,
         transferState = transferState,
         recipientUser = recipientUser,
         remainingTransfers = remainingTransfers,
@@ -67,40 +81,35 @@ fun ZamniaWalletScreen(
         onNavigateToHub = onNavigateToHub,
         onNavigateToSettings = onNavigateToSettings,
         onNavigateToPacks = onNavigateToPacks,
-        onFindRecipient = { walletViewModel.findRecipient(it) },
+        onUpdateFriendId = { walletViewModel.updateFriendId(it) },
+        onUpdateAmount = { walletViewModel.updateAmount(it) },
+        onSetMaxAmount = { walletViewModel.setMaxAmount() },
         onTransferCoins = { id, amt -> walletViewModel.transferCoins(id, amt) },
-        onRefresh = { 
-            walletViewModel.refreshWallet()
-            walletViewModel.resetState()
-        }
+        onResetState = { walletViewModel.resetState() }
     )
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ZamniaWalletContent(
-    userProfile: com.zamnia.quizapp.data.model.User?,
+    userProfile: User?,
+    friendId: String,
+    amount: String,
     transferState: TransferState,
-    recipientUser: com.zamnia.quizapp.data.model.User?,
+    recipientUser: User?,
     remainingTransfers: Int,
     isOnline: Boolean,
     onBack: () -> Unit,
     onNavigateToHub: () -> Unit,
     onNavigateToSettings: () -> Unit,
     onNavigateToPacks: () -> Unit,
-    onFindRecipient: (String) -> Unit,
+    onUpdateFriendId: (String) -> Unit,
+    onUpdateAmount: (String) -> Unit,
+    onSetMaxAmount: () -> Unit,
     onTransferCoins: (String, Long) -> Unit,
-    onRefresh: () -> Unit
+    onResetState: () -> Unit = {}
 ) {
-    var friendId by remember { mutableStateOf("") }
-    var amount by remember { mutableStateOf("") }
     val focusManager = LocalFocusManager.current
-
-    LaunchedEffect(friendId) {
-        if (friendId.length == 6) {
-            onFindRecipient(friendId)
-        }
-    }
 
     Scaffold(
         topBar = {
@@ -120,20 +129,6 @@ fun ZamniaWalletContent(
                             text = "Zamnia",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold
-                        )
-                    }
-                },
-                actions = {
-                    IconButton(onClick = {
-                        onRefresh()
-                        friendId = ""
-                        amount = ""
-                        focusManager.clearFocus()
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Refresh Wallet",
-                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 },
@@ -170,7 +165,7 @@ fun ZamniaWalletContent(
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                 ),
-                border = androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f))
             ) {
                 Box(modifier = Modifier.fillMaxWidth()) {
                     // Background Gradient
@@ -260,7 +255,7 @@ fun ZamniaWalletContent(
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 ZamniaTextField(
                     value = friendId,
-                    onValueChange = { if (it.length <= 6) friendId = it },
+                    onValueChange = onUpdateFriendId,
                     label = "Friend's 6-Digit ID",
                     placeholder = "e.g. 482910",
                     icon = Icons.Default.Fingerprint,
@@ -269,12 +264,12 @@ fun ZamniaWalletContent(
                 
                 ZamniaTextField(
                     value = amount,
-                    onValueChange = { amount = it },
+                    onValueChange = onUpdateAmount,
                     label = "Coin Amount",
                     placeholder = "0",
                     icon = Icons.Default.Toll,
                     trailing = {
-                        TextButton(onClick = { amount = (userProfile?.coinBalance ?: 0L).toString() }) {
+                        TextButton(onClick = onSetMaxAmount) {
                             Text("MAX", color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.labelMedium)
                         }
                     },
@@ -405,9 +400,11 @@ fun ZamniaWalletContent(
 @Preview(showBackground = true, backgroundColor = 0xFF0F131D)
 @Composable
 fun WalletPreview() {
-    com.zamnia.quizapp.ui.theme.ZamniaTheme {
+    ZamniaTheme {
         ZamniaWalletContent(
-            userProfile = com.zamnia.quizapp.data.model.User("1", "482910", "hamza@zamnia.com", "Hamza Explorer", 1250L),
+            userProfile = User("1", "482910", "hamza@zamnia.com", "Hamza Explorer", 1250L),
+            friendId = "482910",
+            amount = "100",
             transferState = TransferState.Idle,
             recipientUser = null,
             remainingTransfers = 2,
@@ -416,9 +413,11 @@ fun WalletPreview() {
             onNavigateToHub = {},
             onNavigateToSettings = {},
             onNavigateToPacks = {},
-            onFindRecipient = {},
+            onUpdateFriendId = {},
+            onUpdateAmount = {},
+            onSetMaxAmount = {},
             onTransferCoins = { _, _ -> },
-            onRefresh = {}
+            onResetState = {}
         )
     }
 }

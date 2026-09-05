@@ -7,88 +7,146 @@ import com.zamnia.quizapp.data.model.Pack
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
+import io.github.jan.supabase.postgrest.query.Order
 import io.github.jan.supabase.postgrest.query.Columns
 import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.realtime.channel
 import io.github.jan.supabase.realtime.postgresChangeFlow
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.map
-import kotlinx.coroutines.flow.onStart
-import kotlinx.coroutines.flow.onCompletion
+import kotlinx.coroutines.flow.callbackFlow
+import kotlinx.coroutines.launch
 import android.util.Log
+import kotlinx.coroutines.DelicateCoroutinesApi
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.GlobalScope
+import kotlinx.coroutines.NonCancellable
+import kotlinx.serialization.builtins.serializer
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.builtins.ListSerializer
+import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
 class SupabaseService(private val client: SupabaseClient) {
 
-    fun getUserProfileStream(uid: String): Flow<User?> {
-        val channel = client.realtime.channel("public:users")
-        return channel.postgresChangeFlow<PostgresAction.Update>(schema = "public") {
+    fun getUserProfileStream(uid: String): Flow<User?> = callbackFlow {
+        val channelTopic = "user_${uid}_${System.currentTimeMillis()}"
+        val channel = client.realtime.channel(channelTopic)
+        
+        val changeFlow = channel.postgresChangeFlow<PostgresAction>(schema = "public") {
             table = "users"
             filter("uid", FilterOperator.EQ, uid)
-        }.map {
-            getUserProfile(uid)
-        }.onStart {
-            emit(getUserProfile(uid))
-        }.onCompletion {
+        }
+
+        val jsonDecoder = Json {
+            ignoreUnknownKeys = true 
+            coerceInputValues = true 
+        }
+
+        val job = launch {
+            changeFlow.collect { action ->
+                Log.d("SupabaseService", "Realtime PostgresAction received on $channelTopic: $action")
+                val remoteUser = try {
+                    when (action) {
+                        is PostgresAction.Update -> jsonDecoder.decodeFromJsonElement(User.serializer(), action.record)
+                        is PostgresAction.Insert -> jsonDecoder.decodeFromJsonElement(User.serializer(), action.record)
+                        else -> getUserProfile(uid)
+                    }
+                } catch (e: Exception) {
+                    Log.w("SupabaseService", "Error decoding realtime record, fetching via Postgrest: ${e.message}")
+                    getUserProfile(uid)
+                }
+
+                if (remoteUser != null) {
+                    trySend(remoteUser)
+                }
+            }
+        }
+
+        // Subscribe channel IMMEDIATELY in parallel so no Realtime events are missed
+        launch {
             try {
-                channel.unsubscribe()
+                client.realtime.connect()
+                channel.subscribe()
+                Log.d("SupabaseService", "Subscribed to realtime channel $channelTopic for UID $uid")
             } catch (e: Exception) {
-                Log.e("SupabaseService", "Error unsubscribing: ${e.message}")
+                Log.e("SupabaseService", "Failed to subscribe to realtime channel $channelTopic: ${e.message}")
+            }
+        }
+
+        // Initial fetch in parallel
+        launch {
+            try {
+                val initialUser = getUserProfile(uid)
+                if (initialUser != null) {
+                    trySend(initialUser)
+                }
+            } catch (e: Exception) {
+                Log.w("SupabaseService", "Initial fetch profile error: ${e.message}")
+            }
+        }
+
+        awaitClose {
+            job.cancel()
+            @OptIn(DelicateCoroutinesApi::class)
+            GlobalScope.launch(Dispatchers.IO) {
+                try {
+                    channel.unsubscribe()
+                    Log.d("SupabaseService", "Unsubscribed realtime channel $channelTopic")
+                } catch (e: Exception) {
+                    Log.e("SupabaseService", "Error unsubscribing channel $channelTopic: ${e.message}")
+                }
             }
         }
     }
 
     suspend fun getUserProfile(uid: String): User? {
-        // We remove the internal try-catch here so that repository 
-        // can distinguish between "User Not Found" and "Network Error"
-        return client.postgrest["users"].select {
+        val list = client.postgrest["users"].select {
             filter {
                 eq("uid", uid)
             }
-        }.decodeSingleOrNull<User>()
+        }.decodeList<User>()
+        return list.firstOrNull()
     }
 
     suspend fun saveUserProfile(user: User) {
-        try {
-            client.postgrest["users"].upsert(user)
-        } catch (e: Exception) {
-            Log.e("SupabaseService", "Error saving user profile: ${e.message}")
-        }
+        client.postgrest["users"].upsert(user)
     }
 
     suspend fun getAvailablePacks(classLevel: Int): List<Pack> {
-        return try {
-            client.postgrest["packs"].select {
-                filter {
-                    eq("class_level", classLevel)
-                }
-            }.decodeList<Pack>()
-        } catch (e: Exception) {
-            Log.e("SupabaseService", "Error getting packs: ${e.message}")
-            emptyList()
-        }
+        return client.postgrest["packs"].select {
+            filter {
+                eq("class_level", classLevel)
+            }
+            order("index_order", Order.ASCENDING)
+        }.decodeList<Pack>()
     }
 
     suspend fun getAvailablePacksForAllClasses(): Result<List<Pack>> {
         return try {
-            val list = client.postgrest["packs"].select().decodeList<Pack>()
-            Result.success(list)
+            val packs = client.postgrest["packs"].select {
+                order("index_order", Order.ASCENDING)
+            }.decodeList<Pack>()
+            Result.success(packs)
         } catch (e: Exception) {
-            Log.e("SupabaseService", "Error getting all packs: ${e.message}")
             Result.failure(e)
         }
     }
 
     suspend fun getUserByPublicId(publicId: String): User? {
         return try {
-            client.postgrest["users"].select {
+            val list = client.postgrest["users"].select {
                 filter {
                     eq("user_id", publicId)
                 }
-            }.decodeSingleOrNull<User>()
+            }.decodeList<User>()
+            list.firstOrNull()
         } catch (e: Exception) {
             null
         }
@@ -96,35 +154,28 @@ class SupabaseService(private val client: SupabaseClient) {
 
     suspend fun isPublicIdUnique(publicId: String): Boolean {
         return try {
-            val response = client.postgrest["users"].select(columns = Columns.list("user_id")) {
+            val list = client.postgrest["users"].select(columns = Columns.list("user_id")) {
                 filter {
                     eq("user_id", publicId)
                 }
-            }
-            response.data == "[]"
+            }.decodeList<User>()
+            list.isEmpty()
         } catch (e: Exception) {
             false
         }
     }
 
-    suspend fun getQuestions(): List<Question> {
-        return try {
-            client.postgrest["mcqs"].select().decodeList<Question>()
-        } catch (e: Exception) {
-            emptyList()
-        }
-    }
-
     suspend fun getQuestionsByPackage(packageId: String): List<Question> {
         return try {
-            // Assuming we have a package_id or similar field in mcqs table in Supabase
-            // If not, we can filter by subject/chapter or just return all for now
-            client.postgrest["mcqs"].select {
+            val list = client.postgrest["mcqs"].select {
                 filter {
                     eq("package_id", packageId)
                 }
             }.decodeList<Question>()
+            Log.d("SupabaseService", "getQuestionsByPackage('$packageId') returned ${list.size} items from 'mcqs'")
+            list
         } catch (e: Exception) {
+            Log.e("SupabaseService", "getQuestionsByPackage('$packageId') error: ${e.message}", e)
             emptyList()
         }
     }
@@ -133,68 +184,135 @@ class SupabaseService(private val client: SupabaseClient) {
         return try {
             client.postgrest["themes"].select().decodeList<Theme>()
         } catch (e: Exception) {
+            Log.w("SupabaseService", "Themes table missing or query failed: ${e.message}")
             emptyList()
         }
     }
 
     suspend fun purchaseTheme(uid: String, themeId: String, price: Long): Result<Unit> {
         return try {
-            client.postgrest.rpc("purchase_theme", buildJsonObject {
-                put("user_uid", uid)
-                put("theme_id", themeId)
-                put("theme_price", price)
-            })
+            val user = getUserProfile(uid) ?: return Result.failure(Exception("User not found"))
+            val currentBalance = user.coinBalance ?: 0L
+            val unlockedList = user.unlockedThemes.orEmpty().toMutableList()
+            if (!unlockedList.contains("default")) {
+                unlockedList.add("default")
+            }
+
+            // If already unlocked, just select it
+            if (unlockedList.contains(themeId)) {
+                return selectTheme(uid, themeId)
+            }
+
+            if (currentBalance < price) {
+                return Result.failure(Exception("Insufficient coins. Required: $price coins"))
+            }
+
+            if (!unlockedList.contains(themeId)) {
+                unlockedList.add(themeId)
+            }
+
+            val newBalance = currentBalance - price
+
+            client.postgrest["users"].update(
+                buildJsonObject {
+                    put("coin_balance", newBalance)
+                    put("active_theme_id", themeId)
+                    put("unlocked_themes", Json.encodeToJsonElement(
+                        ListSerializer(String.serializer()),
+                        unlockedList
+                    ))
+                }
+            ) {
+                filter {
+                    eq("uid", uid)
+                }
+            }
+
             Result.success(Unit)
         } catch (e: Exception) {
+            Log.e("SupabaseService", "purchaseTheme failed for $themeId: ${e.message}", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun selectTheme(uid: String, themeId: String): Result<Unit> {
+        return try {
+            val user = getUserProfile(uid) ?: return Result.failure(Exception("User not found"))
+            val unlockedList = user.unlockedThemes.orEmpty().toMutableList()
+            if (!unlockedList.contains("default")) {
+                unlockedList.add("default")
+            }
+
+            val isUnlocked = unlockedList.contains(themeId) || themeId == "default"
+
+            if (!isUnlocked) {
+                return Result.failure(Exception("Theme '$themeId' is locked. Please purchase it first."))
+            }
+
+            if (!unlockedList.contains(themeId)) {
+                unlockedList.add(themeId)
+            }
+
+            client.postgrest["users"].update(
+                buildJsonObject {
+                    put("active_theme_id", themeId)
+                    put("unlocked_themes", Json.encodeToJsonElement(
+                        ListSerializer(String.serializer()),
+                        unlockedList
+                    ))
+                }
+            ) {
+                filter {
+                    eq("uid", uid)
+                }
+            }
+
+            Result.success(Unit)
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "selectTheme failed for $themeId: ${e.message}", e)
             Result.failure(e)
         }
     }
 
     suspend fun updateQuizCoins(uid: String, isCorrect: Boolean) {
-        val amount = if (isCorrect) 10L else -5L
-        try {
-            client.postgrest.rpc("update_user_coins", buildJsonObject {
-                put("user_uid", uid)
-                put("amount_to_add", amount)
-            })
-        } catch (e: Exception) {
-            Log.e("SupabaseService", "Error updating coins: ${e.message}")
-        }
+        val user = getUserProfile(uid) ?: return
+        val currentCoins = user.coinBalance ?: 0L
+        val updatedCoins = if (isCorrect) currentCoins + 10 else (currentCoins - 5).coerceAtLeast(0)
+        
+        saveUserProfile(user.copy(coinBalance = updatedCoins))
     }
 
     suspend fun transferCoinsRpc(toPublicId: String, amount: Long): String {
         return try {
-            val response = client.postgrest.rpc("transfer_coins", buildJsonObject {
-                put("to_public_id", toPublicId)
-                put("transfer_amount", amount)
-            })
-            // The RPC returns a string like 'SUCCESS', 'DAILY_LIMIT_REACHED', etc.
-            response.data.replace("\"", "")
+            val result = client.postgrest.rpc(
+                function = "transfer_coins",
+                parameters = buildJsonObject {
+                    put("to_public_id", toPublicId)
+                    put("transfer_amount", amount)
+                }
+            )
+            val rawData = result.data.trim().removeSurrounding("\"")
+            Log.d("SupabaseService", "transferCoinsRpc response raw: '${result.data}', clean: '$rawData'")
+            rawData
         } catch (e: Exception) {
-            Log.e("SupabaseService", "Error in transferCoinsRpc: ${e.message}")
-            "ERROR"
+            Log.e("SupabaseService", "transferCoinsRpc error: ${e.message}", e)
+            "ERROR: ${e.localizedMessage}"
         }
     }
 
     suspend fun getDailyTransferCount(uid: String): Int {
         return try {
-            // Get today's date in UTC format to match server
-            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
-            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
-            val today = sdf.format(java.util.Date())
-            
-            val response = client.postgrest["transfers"].select {
-                filter {
-                    eq("sender_id", uid)
-                    gte("created_at", today)
+            val today = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
+            val countStr = client.postgrest.rpc(
+                function = "get_daily_transfer_count",
+                parameters = buildJsonObject {
+                    put("p_sender_id", uid)
+                    put("p_date", today)
                 }
-            }
-            val list = response.decodeList<kotlinx.serialization.json.JsonElement>()
-            list.size
+            ).data
+            countStr.trim().toIntOrNull() ?: 0
         } catch (e: Exception) {
-            Log.e("SupabaseService", "Error getting daily transfer count: ${e.message}")
             0
         }
     }
 }
-

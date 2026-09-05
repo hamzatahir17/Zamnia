@@ -12,5 +12,6 @@ data class UserEntity(
     val email: String,
     val coins: Long,
     val activeThemeId: String,
+    val unlockedThemesCsv: String = "default",
     val lastSyncedAt: Long = System.currentTimeMillis()
 )

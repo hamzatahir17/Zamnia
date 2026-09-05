@@ -44,12 +44,15 @@ fun ZamniaQuizSessionScreen(
     val coinsEarned by viewModel.coinsEarned.collectAsState()
 
     // Start quiz immediately when screen opens
-    LaunchedEffect(Unit) {
+    LaunchedEffect(packageId) {
         viewModel.startQuiz(0, packageId) 
     }
 
+    var hasNavigatedToResults by remember { mutableStateOf(false) }
+
     LaunchedEffect(isFinished) {
-        if (isFinished) {
+        if (isFinished && !hasNavigatedToResults) {
+            hasNavigatedToResults = true
             onQuizFinished(score, questions.size, coinsEarned)
         }
     }
@@ -75,7 +78,10 @@ fun ZamniaQuizSessionScreen(
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
-            if (questions.isNotEmpty()) {
+            val safeIndex = currentIndex.coerceIn(0, (questions.size - 1).coerceAtLeast(0))
+            if (questions.isNotEmpty() && safeIndex < questions.size) {
+                val currentQuestion = questions[safeIndex]
+                
                 // Progress Header
                 Column(modifier = Modifier.padding(20.dp)) {
                     Row(
@@ -83,7 +89,7 @@ fun ZamniaQuizSessionScreen(
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
                         Text(
-                            text = "QUESTION ${currentIndex + 1} OF ${questions.size}",
+                            text = "QUESTION ${safeIndex + 1} OF ${questions.size}",
                             style = MaterialTheme.typography.labelMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             letterSpacing = 1.sp
@@ -91,7 +97,7 @@ fun ZamniaQuizSessionScreen(
                     }
                     Spacer(modifier = Modifier.height(8.dp))
                     LinearProgressIndicator(
-                        progress = { (currentIndex + 1).toFloat() / questions.size },
+                        progress = { (safeIndex + 1).toFloat() / questions.size },
                         modifier = Modifier
                             .fillMaxWidth()
                             .height(8.dp)
@@ -108,7 +114,6 @@ fun ZamniaQuizSessionScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     item {
-                        val currentQuestion = questions[currentIndex]
                         // Question Card
                         Card(
                             modifier = Modifier.fillMaxWidth(),
@@ -155,9 +160,8 @@ fun ZamniaQuizSessionScreen(
                         }
                     }
 
-                    itemsIndexed(questions[currentIndex].options) { index, option ->
+                    itemsIndexed(currentQuestion.options) { index, option ->
                         val letter = ('A' + index).toString()
-                        val currentQuestion = questions[currentIndex]
                         
                         val isCorrect = index == currentQuestion.correctAnswerIndex
                         val isSelected = selectedAnswer == index

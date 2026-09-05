@@ -3,6 +3,7 @@ package com.zamnia.quizapp.ui.zamnia
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -15,6 +16,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -28,6 +30,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import android.widget.Toast
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.runtime.LaunchedEffect
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zamnia.quizapp.data.model.Theme
 import com.zamnia.quizapp.ui.settings.SettingsViewModel
@@ -46,6 +50,15 @@ fun ZamniaSettingsScreen(
     val userProfile by viewModel.userProfile.collectAsState()
     val availableThemes by viewModel.availableThemes.collectAsState()
     val authState by authViewModel.authState.collectAsState()
+    val purchaseMessage by viewModel.purchaseMessage.collectAsState()
+    val context = LocalContext.current
+
+    LaunchedEffect(purchaseMessage) {
+        purchaseMessage?.let { msg ->
+            Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            viewModel.clearPurchaseMessage()
+        }
+    }
 
     // Handle logout navigation after state change
     androidx.compose.runtime.LaunchedEffect(authState) {
@@ -112,7 +125,8 @@ fun ZamniaSettingsScreen(
                     availableThemes = availableThemes,
                     unlockedThemes = userProfile?.unlockedThemes ?: listOf("default"),
                     activeThemeId = userProfile?.activeThemeId ?: "default",
-                    onPurchase = { id, price -> viewModel.purchaseTheme(id, price) }
+                    onPurchase = { id, price -> viewModel.purchaseTheme(id, price) },
+                    onSelect = { id -> viewModel.selectTheme(id) }
                 )
             }
             
@@ -207,7 +221,8 @@ fun ThemeStoreSection(
     availableThemes: List<Theme>,
     unlockedThemes: List<String>,
     activeThemeId: String,
-    onPurchase: (String, Long) -> Unit
+    onPurchase: (String, Long) -> Unit,
+    onSelect: (String) -> Unit
 ) {
     Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
         Row(
@@ -231,7 +246,7 @@ fun ThemeStoreSection(
         
         LazyRow(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
             items(availableThemes) { theme ->
-                val isUnlocked = unlockedThemes.contains(theme.id)
+                val isUnlocked = unlockedThemes.contains(theme.id) || theme.id == "default"
                 val isActive = activeThemeId == theme.id
                 ThemeCard(
                     theme = theme,
@@ -239,7 +254,7 @@ fun ThemeStoreSection(
                     isActive = isActive,
                     onAction = {
                         if (isUnlocked) {
-                            // Logic to set active theme
+                            onSelect(theme.id)
                         } else {
                             onPurchase(theme.id, theme.price.toLong())
                         }
@@ -267,38 +282,87 @@ fun ThemeCard(theme: Theme, isUnlocked: Boolean, isActive: Boolean, onAction: ()
     Card(
         modifier = Modifier.width(260.dp),
         shape = RoundedCornerShape(24.dp),
-        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        border = androidx.compose.foundation.BorderStroke(1.dp, if (isActive) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.1f))
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)),
+        border = BorderStroke(
+            width = if (isActive) 2.dp else 1.dp,
+            color = if (isActive) MaterialTheme.colorScheme.primary else Color.White.copy(alpha = 0.1f)
+        )
     ) {
-        Column(modifier = Modifier.padding(16.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+        Column(
+            modifier = Modifier
+                .padding(16.dp)
+                .fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
                 Column {
-                    Text(text = theme.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    Text(text = if (isActive) "Active Protocol" else if (isUnlocked) "Unlocked" else "Available", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(
+                        text = theme.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = if (isActive) "Active Protocol" else if (isUnlocked) "Unlocked" else "Available",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 if (isActive) {
-                    Icon(Icons.Default.CheckCircle, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Icon(
+                        imageVector = Icons.Default.CheckCircle,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
                 }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                Box(modifier = Modifier.size(32.dp).background(MaterialTheme.colorScheme.background, CircleShape).border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape))
-                Box(modifier = Modifier.size(32.dp).background(Color(android.graphics.Color.parseColor(theme.primaryColor.ifEmpty { "#D0BCFF" })), CircleShape))
-                Box(modifier = Modifier.size(32.dp).background(Color(android.graphics.Color.parseColor(theme.secondaryColor.ifEmpty { "#4CD7F6" })), CircleShape))
+                val primaryColorParsed = remember(theme.primaryColor) {
+                    try {
+                        Color(android.graphics.Color.parseColor(theme.primaryColor.ifEmpty { "#6366F1" }))
+                    } catch (e: Exception) {
+                        Color(0xFF6366F1)
+                    }
+                }
+                val secondaryColorParsed = remember(theme.secondaryColor) {
+                    try {
+                        Color(android.graphics.Color.parseColor(theme.secondaryColor.ifEmpty { "#4F46E5" }))
+                    } catch (e: Exception) {
+                        Color(0xFF4F46E5)
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(primaryColorParsed, CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                )
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .background(secondaryColorParsed, CircleShape)
+                        .border(1.dp, Color.White.copy(alpha = 0.2f), CircleShape)
+                )
             }
             Button(
                 onClick = onAction,
                 modifier = Modifier.fillMaxWidth(),
                 colors = ButtonDefaults.buttonColors(
-                    containerColor = if (isActive) MaterialTheme.colorScheme.primary else if (isUnlocked) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.primary
+                    containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer else if (isUnlocked) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
                 ),
                 shape = CircleShape,
                 enabled = !isActive
             ) {
-                val buttonText = if (isActive) "Applied" else if (isUnlocked) "Apply" else "Unlock • ${theme.price}"
-                Text(text = buttonText)
+                val buttonText = if (isActive) "Applied" else if (isUnlocked) "Apply Theme" else "Unlock • ${theme.price}"
+                Text(text = buttonText, fontWeight = FontWeight.Bold)
                 if (!isUnlocked && !isActive) {
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(Icons.Default.MonetizationOn, contentDescription = null, modifier = Modifier.size(14.dp))
+                    Spacer(modifier = Modifier.width(6.dp))
+                    Icon(Icons.Default.MonetizationOn, contentDescription = null, modifier = Modifier.size(16.dp))
                 }
             }
         }

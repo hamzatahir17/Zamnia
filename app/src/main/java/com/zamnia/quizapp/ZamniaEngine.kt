@@ -1,6 +1,7 @@
 package com.zamnia.quizapp
 
 import android.content.Context
+import android.util.Log
 import androidx.room.Room
 import androidx.room.RoomDatabase
 import com.zamnia.quizapp.data.local.ZamniaDatabase
@@ -14,7 +15,12 @@ import io.github.jan.supabase.auth.Auth
 import io.github.jan.supabase.auth.SettingsSessionManager
 import io.github.jan.supabase.postgrest.Postgrest
 import io.github.jan.supabase.realtime.Realtime
+import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.storage.Storage
+import io.ktor.client.engine.okhttp.OkHttp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Zamnia Backend Engine (Production Ready)
@@ -47,6 +53,7 @@ object ZamniaEngine {
             supabaseUrl = BuildConfig.SUPABASE_URL,
             supabaseKey = BuildConfig.SUPABASE_KEY
         ) {
+            httpEngine = OkHttp.create()
             install(Auth) {
                 sessionManager = SettingsSessionManager()
             }
@@ -67,5 +74,14 @@ object ZamniaEngine {
         )
 
         networkObserver = NetworkObserver(context)
+
+        // Pre-warm Realtime WebSocket connection on app launch
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                supabase.realtime.connect()
+            } catch (e: Exception) {
+                Log.w("ZamniaEngine", "Realtime pre-connect: ${e.message}")
+            }
+        }
     }
 }
