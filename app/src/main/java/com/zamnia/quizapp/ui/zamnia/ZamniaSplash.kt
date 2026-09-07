@@ -62,8 +62,8 @@ fun ZamniaSplashScreen(
             contentDescription = "Zamnia Professional Logo",
             contentScale = ContentScale.FillBounds, // Forces exact width/height match
             modifier = Modifier
-                .width(180.dp) // Adjusted width to match native scaling feel
-                .height(180.dp)
+                .width(150.dp) // Adjusted width to match native scaling feel
+                .height(150.dp)
         )
 
         // Loading section is placed at the bottom of the screen

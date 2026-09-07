@@ -3,6 +3,6 @@
     <item
         android:drawable="@drawable/screen"
         android:gravity="center"
-        android:width="180dp"
-        android:height="180dp" />
+        android:width="150dp"
+        android:height="150dp" />
 </layer-list>

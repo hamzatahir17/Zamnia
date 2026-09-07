@@ -118,7 +118,13 @@ class SupabaseService(private val client: SupabaseClient) {
     }
 
     suspend fun saveUserProfile(user: User) {
-        client.postgrest["users"].upsert(user)
+        try {
+            val safeEmail = user.email.ifBlank { "guest@zamnia.com" }
+            val safeUser = user.copy(email = safeEmail)
+            client.postgrest["users"].upsert(safeUser)
+        } catch (e: Exception) {
+            Log.w("SupabaseService", "saveUserProfile error: ${e.message}")
+        }
     }
 
     suspend fun getAvailablePacks(classLevel: Int): List<Pack> {
