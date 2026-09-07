@@ -7,7 +7,7 @@ import kotlinx.serialization.SerialName
 data class User(
     val uid: String = "",
     @SerialName("user_id")
-    val userId: String? = null, // Nullable to allow Database DEFAULT generation
+    val userId: String? = null,
     val email: String = "",
     @SerialName("display_name")
     val displayName: String = "",
@@ -19,4 +19,10 @@ data class User(
     val activeThemeId: String = "default",
     @SerialName("last_custom_timer")
     val lastCustomTimer: Int = 30
-)
+) {
+    val isGuest: Boolean
+        get() = email.isBlank() || 
+                email == "guest@zamnia.com" || 
+                email.startsWith("guest", ignoreCase = true) || 
+                displayName == "Guest Explorer"
+}

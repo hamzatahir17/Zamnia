@@ -1,5 +1,7 @@
 package com.zamnia.quizapp.ui.zamnia
 
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
@@ -52,6 +54,12 @@ fun ZamniaSettingsScreen(
     val authState by authViewModel.authState.collectAsState()
     val purchaseMessage by viewModel.purchaseMessage.collectAsState()
     val context = LocalContext.current
+
+    val googleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        authViewModel.handleGoogleSignInResult(result.data)
+    }
 
     LaunchedEffect(purchaseMessage) {
         purchaseMessage?.let { msg ->
@@ -118,6 +126,18 @@ fun ZamniaSettingsScreen(
                     email = userProfile?.email ?: "",
                     publicId = userProfile?.userId ?: "------"
                 )
+            }
+
+            if (userProfile?.isGuest == true) {
+                item {
+                    GuestUpgradeCard(
+                        onConnectGoogle = {
+                            authViewModel.signInWithGoogle(context) {
+                                googleLauncher.launch(authViewModel.getGoogleSignInIntent(context))
+                            }
+                        }
+                    )
+                }
             }
             
             item {
@@ -439,5 +459,68 @@ fun SettingsClickItem(icon: ImageVector, title: String, desc: String, color: Col
             Text(text = desc, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         }
         Icon(Icons.Default.ChevronRight, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+    }
+}
+
+@Composable
+fun GuestUpgradeCard(onConnectGoogle: () -> Unit) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.3f))
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Surface(
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                    shape = CircleShape
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudUpload,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(10.dp).size(24.dp)
+                    )
+                }
+                Column {
+                    Text(
+                        text = "Save Progress Permanently",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold
+                    )
+                    Text(
+                        text = "Link with Google to keep your coins & downloaded packs safe.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            Button(
+                onClick = onConnectGoogle,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(48.dp),
+                shape = CircleShape,
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text("G", fontWeight = FontWeight.Black, fontSize = 18.sp)
+                    Text("Connect Google Account", fontWeight = FontWeight.Bold)
+                }
+            }
+        }
     }
 }

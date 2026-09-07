@@ -56,6 +56,10 @@ class SupabaseService(private val client: SupabaseClient) {
                     when (action) {
                         is PostgresAction.Update -> jsonDecoder.decodeFromJsonElement(User.serializer(), action.record)
                         is PostgresAction.Insert -> jsonDecoder.decodeFromJsonElement(User.serializer(), action.record)
+                        is PostgresAction.Delete -> {
+                            Log.w("SupabaseService", "User record deleted in Realtime for $uid")
+                            null
+                        }
                         else -> getUserProfile(uid)
                     }
                 } catch (e: Exception) {
@@ -63,9 +67,7 @@ class SupabaseService(private val client: SupabaseClient) {
                     getUserProfile(uid)
                 }
 
-                if (remoteUser != null) {
-                    trySend(remoteUser)
-                }
+                trySend(remoteUser)
             }
         }
 
@@ -271,6 +273,34 @@ class SupabaseService(private val client: SupabaseClient) {
         } catch (e: Exception) {
             Log.e("SupabaseService", "selectTheme failed for $themeId: ${e.message}", e)
             Result.failure(e)
+        }
+    }
+
+    suspend fun migrateGuestUserRpc(guestUid: String) {
+        try {
+            client.postgrest.rpc(
+                function = "migrate_guest_user",
+                parameters = buildJsonObject {
+                    put("p_guest_uid", guestUid)
+                }
+            )
+            Log.d("SupabaseService", "Migrated guest $guestUid via RPC")
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "migrateGuestUserRpc error: ${e.message}", e)
+            deleteUser(guestUid)
+        }
+    }
+
+    suspend fun deleteUser(uid: String) {
+        try {
+            client.postgrest["users"].delete {
+                filter {
+                    eq("uid", uid)
+                }
+            }
+            Log.d("SupabaseService", "Deleted user $uid from remote Supabase public.users table")
+        } catch (e: Exception) {
+            Log.w("SupabaseService", "Error deleting remote user $uid: ${e.message}")
         }
     }
 
