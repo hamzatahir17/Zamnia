@@ -18,6 +18,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
@@ -67,7 +68,11 @@ fun ZamniaWalletScreen(
         onNavigateToSettings = onNavigateToSettings,
         onNavigateToPacks = onNavigateToPacks,
         onFindRecipient = { walletViewModel.findRecipient(it) },
-        onTransferCoins = { id, amt -> walletViewModel.transferCoins(id, amt) }
+        onTransferCoins = { id, amt -> walletViewModel.transferCoins(id, amt) },
+        onRefresh = { 
+            walletViewModel.refreshWallet()
+            walletViewModel.resetState()
+        }
     )
 }
 
@@ -84,10 +89,12 @@ fun ZamniaWalletContent(
     onNavigateToSettings: () -> Unit,
     onNavigateToPacks: () -> Unit,
     onFindRecipient: (String) -> Unit,
-    onTransferCoins: (String, Long) -> Unit
+    onTransferCoins: (String, Long) -> Unit,
+    onRefresh: () -> Unit
 ) {
     var friendId by remember { mutableStateOf("") }
     var amount by remember { mutableStateOf("") }
+    val focusManager = LocalFocusManager.current
 
     LaunchedEffect(friendId) {
         if (friendId.length == 6) {
@@ -113,6 +120,20 @@ fun ZamniaWalletContent(
                             text = "Zamnia",
                             style = MaterialTheme.typography.headlineSmall,
                             fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                actions = {
+                    IconButton(onClick = {
+                        onRefresh()
+                        friendId = ""
+                        amount = ""
+                        focusManager.clearFocus()
+                    }) {
+                        Icon(
+                            imageVector = Icons.Default.Refresh,
+                            contentDescription = "Refresh Wallet",
+                            tint = MaterialTheme.colorScheme.primary
                         )
                     }
                 },
@@ -194,7 +215,7 @@ fun ZamniaWalletContent(
                         }
                         
                         Row(
-                            verticalAlignment = Alignment.Bottom,
+                            verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                             modifier = Modifier.padding(vertical = 8.dp)
                         ) {
@@ -396,7 +417,8 @@ fun WalletPreview() {
             onNavigateToSettings = {},
             onNavigateToPacks = {},
             onFindRecipient = {},
-            onTransferCoins = { _, _ -> }
+            onTransferCoins = { _, _ -> },
+            onRefresh = {}
         )
     }
 }

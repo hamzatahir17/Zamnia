@@ -78,6 +78,7 @@ class WalletViewModel : ViewModel() {
 
     fun resetState() {
         _transferState.value = TransferState.Idle
+        _recipientUser.value = null
     }
 }
 

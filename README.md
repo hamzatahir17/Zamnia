@@ -53,3 +53,4 @@ Sensitive data (API Keys, Client IDs) are managed through `BuildConfig` and `loc
 
 ---
 Built with ❤️ by [Your Name/Github Handle]
+# CryptoPulse

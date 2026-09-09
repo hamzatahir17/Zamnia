@@ -2,7 +2,6 @@ package com.zamnia.quizapp.ui.auth
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.zamnia.quizapp.BuildConfig
 import com.zamnia.quizapp.ZamniaEngine
 import com.zamnia.quizapp.data.model.User
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -18,8 +17,10 @@ import androidx.credentials.GetCredentialRequest
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
 import io.github.jan.supabase.auth.auth
+import io.github.jan.supabase.auth.status.SessionStatus
 import io.github.jan.supabase.auth.providers.builtin.IDToken
 import io.github.jan.supabase.auth.providers.Google
+import kotlinx.coroutines.flow.first
 
 class AuthViewModel : ViewModel() {
     private val client = ZamniaEngine.supabase
@@ -31,6 +32,15 @@ class AuthViewModel : ViewModel() {
     private val _authState = MutableStateFlow<AuthState>(AuthState.Idle)
     val authState: StateFlow<AuthState> = _authState.asStateFlow()
 
+    init {
+        // Monitor session status for debugging
+        viewModelScope.launch {
+            client.auth.sessionStatus.collect { status ->
+                android.util.Log.d("AuthViewModel", "Session Status Changed: $status")
+            }
+        }
+    }
+
     fun signInWithGoogle(context: Context) {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
@@ -39,7 +49,7 @@ class AuthViewModel : ViewModel() {
                 
                 val googleIdOption = GetGoogleIdOption.Builder()
                     .setFilterByAuthorizedAccounts(false)
-                    .setServerClientId(BuildConfig.GOOGLE_WEB_CLIENT_ID)
+                    .setServerClientId(com.zamnia.quizapp.BuildConfig.GOOGLE_WEB_CLIENT_ID)
                     .setAutoSelectEnabled(true)
                     .build()
 
@@ -58,16 +68,22 @@ class AuthViewModel : ViewModel() {
                     }
                     
                     val uid = client.auth.currentUserOrNull()?.id ?: ""
+                    val email = client.auth.currentUserOrNull()?.email ?: ""
                     
                     // If profile doesn't exist, initialize it
                     val existingProfile = repository.getUserProfile()
                     if (existingProfile == null) {
+                        // Extract name: Google Name > Email Prefix > Explorer
+                        val realName = credential.displayName 
+                            ?: email.substringBefore("@").takeIf { it.isNotEmpty() }
+                            ?: "Explorer"
+
                         val user = User(
                             uid = uid,
                             // userId is null so Supabase can generate it automatically
                             userId = null, 
-                            email = client.auth.currentUserOrNull()?.email ?: "",
-                            displayName = "Explorer",
+                            email = email,
+                            displayName = realName,
                             coinBalance = 0L
                         )
                         repository.saveUserProfile(user)
@@ -124,6 +140,9 @@ class AuthViewModel : ViewModel() {
      * Uses Dispatchers.IO to ensure no UI thread freezing.
      */
     suspend fun validateSession(): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        // Wait for session to load from storage
+        client.auth.sessionStatus.first { it !is SessionStatus.Initializing }
+
         if (client.auth.currentUserOrNull() == null) return@withContext false
         
         return@withContext try {
