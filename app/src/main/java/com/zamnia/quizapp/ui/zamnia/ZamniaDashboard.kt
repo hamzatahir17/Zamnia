@@ -15,6 +15,9 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -29,7 +32,6 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zamnia.quizapp.ui.dashboard.DashboardViewModel
 import com.zamnia.quizapp.ui.packs.PacksViewModel
 import com.zamnia.quizapp.ui.zamnia.components.ZamniaBottomNavigation
-import com.zamnia.quizapp.ui.zamnia.components.ZamniaHeader
 
 data class ActiveSubject(
     val name: String,
@@ -38,6 +40,7 @@ data class ActiveSubject(
     val color: Color
 )
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ZamniaDashboardScreen(
     onNavigateToWallet: () -> Unit,
@@ -46,27 +49,56 @@ fun ZamniaDashboardScreen(
     onNavigateToPacks: () -> Unit,
     onLogout: () -> Unit,
     viewModel: DashboardViewModel = viewModel(),
-    packsViewModel: PacksViewModel = viewModel()
+    packsViewModel: PacksViewModel = viewModel(),
+    authViewModel: com.zamnia.quizapp.ui.auth.AuthViewModel = viewModel()
 ) {
     val userProfile by viewModel.userProfile.collectAsState()
     val isLoading by viewModel.isLoading.collectAsState()
     val downloadedPacks by packsViewModel.downloadedPackages.collectAsState()
     val activeSubjects by viewModel.activeSubjects.collectAsState()
+    val authState by authViewModel.authState.collectAsState()
 
     val pagerState = rememberPagerState(pageCount = { activeSubjects.size })
 
-    androidx.compose.runtime.LaunchedEffect(userProfile, isLoading) {
-        if (userProfile == null && !isLoading) {
+    // Use a flag to ensure onLogout is only called once per session loss
+    var isLoggingOut by remember { mutableStateOf(false) }
+
+    androidx.compose.runtime.LaunchedEffect(userProfile, isLoading, authState) {
+        // Strict guard: Only navigate to auth if we are 100% sure the user is unauthenticated
+        // and we are not in the middle of a loading operation.
+        val isUnauthenticated = userProfile == null && !isLoading && authState is com.zamnia.quizapp.ui.auth.AuthState.LoggedOut
+        
+        if (isUnauthenticated && !isLoggingOut) {
+            isLoggingOut = true
             onLogout()
         }
     }
 
     Scaffold(
-        topBar = { 
-            ZamniaHeader(
-                coins = userProfile?.coinBalance ?: 0L,
-                onProfileClick = onNavigateToSettings
-            ) 
+        topBar = {
+            TopAppBar(
+                title = {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Hub,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(32.dp)
+                        )
+                        Text(
+                            text = "Zamnia",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+                },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.background.copy(alpha = 0.8f)
+                )
+            )
         },
         bottomBar = { 
             ZamniaBottomNavigation(

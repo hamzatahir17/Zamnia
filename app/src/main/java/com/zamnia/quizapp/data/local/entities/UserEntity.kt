@@ -6,7 +6,8 @@ import androidx.room.PrimaryKey
 @Entity(tableName = "users_local")
 data class UserEntity(
     @PrimaryKey
-    val userId: String, // Supabase User ID
+    val userId: String, // Supabase User UID
+    val publicId: String?, // Zamnia Public ID
     val name: String,
     val email: String,
     val coins: Long,

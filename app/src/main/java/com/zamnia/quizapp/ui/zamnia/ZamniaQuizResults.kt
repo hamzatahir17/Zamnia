@@ -2,6 +2,8 @@ package com.zamnia.quizapp.ui.zamnia
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
@@ -14,10 +16,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.colorResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.zamnia.quizapp.R
 import com.zamnia.quizapp.ui.quiz.QuizResponse
 
 @Composable
@@ -26,6 +31,7 @@ fun ZamniaQuizResultsScreen(
     total: Int,
     coins: Int = 0,
     responses: List<QuizResponse> = emptyList(),
+    onPlayAgain: () -> Unit = {},
     onReturnToDashboard: () -> Unit
 ) {
     val percentage = if (total > 0) (score.toFloat() / total.toFloat() * 100).toInt() else 0
@@ -34,26 +40,21 @@ fun ZamniaQuizResultsScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+            .background(colorResource(id = R.color.splash_background)),
         contentAlignment = Alignment.Center
     ) {
-        // Confetti/Glow effects
-        Box(
-            modifier = Modifier
-                .size(300.dp)
-                .blur(100.dp)
-                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f), CircleShape)
-        )
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(24.dp),
+                .padding(24.dp)
+                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.Top
         ) {
+            Spacer(modifier = Modifier.height(40.dp)) // Initial top spacing
+
             Text(
-                text = "Level Complete!",
+                text = "Session Completed",
                 style = MaterialTheme.typography.displayMedium,
                 fontWeight = FontWeight.ExtraBold,
                 color = MaterialTheme.colorScheme.onSurface,
@@ -127,6 +128,17 @@ fun ZamniaQuizResultsScreen(
             Spacer(modifier = Modifier.height(32.dp))
 
             Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                Button(
+                    onClick = onPlayAgain,
+                    modifier = Modifier.fillMaxWidth().height(64.dp),
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.secondary),
+                    shape = CircleShape
+                ) {
+                    Icon(Icons.Default.PlayArrow, contentDescription = null)
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Next 20 MCQs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSecondary)
+                }
+
                 Button(
                     onClick = { showReview = true },
                     modifier = Modifier.fillMaxWidth().height(64.dp),
@@ -209,6 +221,19 @@ fun ReviewItemCard(response: QuizResponse) {
                 )
             }
         }
+    }
+}
+
+@Preview(showBackground = true, backgroundColor = 0xFF0F131D)
+@Composable
+fun ResultsPreview() {
+    com.zamnia.quizapp.ui.theme.ZamniaTheme {
+        ZamniaQuizResultsScreen(
+            score = 15,
+            total = 20,
+            coins = 150,
+            onReturnToDashboard = {}
+        )
     }
 }
 

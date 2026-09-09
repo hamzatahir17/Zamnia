@@ -18,6 +18,25 @@ class WalletViewModel : ViewModel() {
     private val _recipientUser = MutableStateFlow<User?>(null)
     val recipientUser: StateFlow<User?> = _recipientUser.asStateFlow()
 
+    private val _remainingTransfers = MutableStateFlow(2)
+    val remainingTransfers: StateFlow<Int> = _remainingTransfers.asStateFlow()
+
+    init {
+        // Automatically refresh on init
+        refreshWallet()
+    }
+
+    fun refreshWallet() {
+        viewModelScope.launch {
+            // Refresh daily limit from Supabase
+            val count = repository.getDailyTransferCount()
+            _remainingTransfers.value = (2 - count).coerceAtLeast(0)
+            
+            // Refresh user profile for latest coins
+            repository.getUserProfile()
+        }
+    }
+
     fun findRecipient(publicId: String) {
         if (publicId.length < 6) {
             _recipientUser.value = null
@@ -31,11 +50,28 @@ class WalletViewModel : ViewModel() {
     fun transferCoins(publicId: String, amount: Long) {
         viewModelScope.launch {
             _transferState.value = TransferState.Loading
-            val result = repository.transferCoins(publicId, amount)
-            if (result.isSuccess) {
-                _transferState.value = TransferState.Success
-            } else {
-                _transferState.value = TransferState.Error(result.exceptionOrNull()?.message ?: "Transfer failed")
+            val response = repository.transferCoins(publicId, amount)
+            
+            when (response) {
+                "SUCCESS" -> {
+                    _transferState.value = TransferState.Success
+                    refreshWallet() // Automatically refresh everything after success
+                }
+                "DAILY_LIMIT_REACHED" -> {
+                    _transferState.value = TransferState.Error("Daily limit of 2 transfers reached.")
+                }
+                "INSUFFICIENT_FUNDS" -> {
+                    _transferState.value = TransferState.Error("You don't have enough coins.")
+                }
+                "INVALID_RECIPIENT" -> {
+                    _transferState.value = TransferState.Error("Friend ID not found.")
+                }
+                "SAME_USER" -> {
+                    _transferState.value = TransferState.Error("You cannot send coins to yourself.")
+                }
+                else -> {
+                    _transferState.value = TransferState.Error("Transfer failed: $response")
+                }
             }
         }
     }

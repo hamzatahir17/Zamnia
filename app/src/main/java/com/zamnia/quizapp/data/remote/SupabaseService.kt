@@ -8,6 +8,7 @@ import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.auth.auth
 import io.github.jan.supabase.postgrest.postgrest
 import io.github.jan.supabase.postgrest.query.Columns
+import io.github.jan.supabase.postgrest.query.filter.FilterOperator
 import io.github.jan.supabase.realtime.PostgresAction
 import io.github.jan.supabase.realtime.realtime
 import io.github.jan.supabase.realtime.channel
@@ -15,6 +16,7 @@ import io.github.jan.supabase.realtime.postgresChangeFlow
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onStart
+import kotlinx.coroutines.flow.onCompletion
 import android.util.Log
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -25,10 +27,17 @@ class SupabaseService(private val client: SupabaseClient) {
         val channel = client.realtime.channel("public:users")
         return channel.postgresChangeFlow<PostgresAction.Update>(schema = "public") {
             table = "users"
+            filter("uid", FilterOperator.EQ, uid)
         }.map {
             getUserProfile(uid)
         }.onStart {
             emit(getUserProfile(uid))
+        }.onCompletion {
+            try {
+                channel.unsubscribe()
+            } catch (e: Exception) {
+                Log.e("SupabaseService", "Error unsubscribing: ${e.message}")
+            }
         }
     }
 
@@ -77,7 +86,7 @@ class SupabaseService(private val client: SupabaseClient) {
         return try {
             client.postgrest["users"].select {
                 filter {
-                    eq("userId", publicId)
+                    eq("user_id", publicId)
                 }
             }.decodeSingleOrNull<User>()
         } catch (e: Exception) {
@@ -153,16 +162,38 @@ class SupabaseService(private val client: SupabaseClient) {
         }
     }
 
-    suspend fun transferCoins(fromUid: String, toPublicId: String, amount: Long): Result<Unit> {
+    suspend fun transferCoinsRpc(toPublicId: String, amount: Long): String {
         return try {
-            client.postgrest.rpc("transfer_coins", buildJsonObject {
-                put("from_uid", fromUid)
+            val response = client.postgrest.rpc("transfer_coins", buildJsonObject {
                 put("to_public_id", toPublicId)
-                put("amount_to_transfer", amount)
+                put("transfer_amount", amount)
             })
-            Result.success(Unit)
+            // The RPC returns a string like 'SUCCESS', 'DAILY_LIMIT_REACHED', etc.
+            response.data.replace("\"", "")
         } catch (e: Exception) {
-            Result.failure(e)
+            Log.e("SupabaseService", "Error in transferCoinsRpc: ${e.message}")
+            "ERROR"
+        }
+    }
+
+    suspend fun getDailyTransferCount(uid: String): Int {
+        return try {
+            // Get today's date in UTC format to match server
+            val sdf = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+            sdf.timeZone = java.util.TimeZone.getTimeZone("UTC")
+            val today = sdf.format(java.util.Date())
+            
+            val response = client.postgrest["transfers"].select {
+                filter {
+                    eq("sender_id", uid)
+                    gte("created_at", today)
+                }
+            }
+            val list = response.decodeList<kotlinx.serialization.json.JsonElement>()
+            list.size
+        } catch (e: Exception) {
+            Log.e("SupabaseService", "Error getting daily transfer count: ${e.message}")
+            0
         }
     }
 }

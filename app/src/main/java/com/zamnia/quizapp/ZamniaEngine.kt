@@ -6,6 +6,7 @@ import androidx.room.RoomDatabase
 import com.zamnia.quizapp.data.local.ZamniaDatabase
 import com.zamnia.quizapp.data.remote.SupabaseService
 import com.zamnia.quizapp.data.repository.ZamniaRepository
+import com.zamnia.quizapp.util.NetworkObserver
 import com.zamnia.quizapp.BuildConfig
 import io.github.jan.supabase.SupabaseClient
 import io.github.jan.supabase.createSupabaseClient
@@ -22,6 +23,8 @@ object ZamniaEngine {
     lateinit var supabase: SupabaseClient
         private set
     lateinit var repository: ZamniaRepository
+        private set
+    lateinit var networkObserver: NetworkObserver
         private set
 
     fun initialize(context: Context) {
@@ -53,10 +56,13 @@ object ZamniaEngine {
         
         repository = ZamniaRepository(
             supabase = supabaseService,
+            database = database,
             packageDao = database.packageDao(),
             quizDao = database.quizDao(),
             userDao = database.userDao(),
             userPrefsDao = database.userPrefsDao()
         )
+
+        networkObserver = NetworkObserver(context)
     }
 }

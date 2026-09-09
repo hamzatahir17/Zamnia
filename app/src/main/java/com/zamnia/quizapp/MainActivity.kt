@@ -148,22 +148,25 @@ class MainActivity : ComponentActivity() {
                                 packageId = idToPass,
                                 onBack = { navController.popBackStack() },
                                 onQuizFinished = { score, total, coins ->
-                                    navController.navigate("results/$score/$total/$coins")
+                                    navController.navigate("results/$score/$total/$coins/$packageId")
                                 },
                                 viewModel = quizViewModel
                             )
                         }
                         composable(
-                            route = "results/{score}/{total}/{coins}",
+                            route = "results/{score}/{total}/{coins}/{packageId}",
                             arguments = listOf(
                                 navArgument("score") { type = NavType.IntType },
                                 navArgument("total") { type = NavType.IntType },
-                                navArgument("coins") { type = NavType.IntType }
+                                navArgument("coins") { type = NavType.IntType },
+                                navArgument("packageId") { type = NavType.StringType }
                             )
                         ) { backStackEntry ->
                             val score = backStackEntry.arguments?.getInt("score") ?: 0
                             val total = backStackEntry.arguments?.getInt("total") ?: 0
                             val coins = backStackEntry.arguments?.getInt("coins") ?: 0
+                            val packageId = backStackEntry.arguments?.getString("packageId")
+                            val idToPass = if (packageId == "general") null else packageId
                             
                             val parentEntry = remember(backStackEntry) {
                                 navController.getBackStackEntry("quiz_flow/{packageId}")
@@ -176,6 +179,11 @@ class MainActivity : ComponentActivity() {
                                 total = total,
                                 coins = coins,
                                 responses = responses,
+                                onPlayAgain = {
+                                    // Reset the state first to prevent immediate navigation back to results
+                                    quizViewModel.startQuiz(0, idToPass)
+                                    navController.popBackStack() 
+                                },
                                 onReturnToDashboard = {
                                     navController.navigate("dashboard") {
                                         popUpTo("dashboard") { inclusive = true }

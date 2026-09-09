@@ -41,7 +41,9 @@ fun ZamniaOnboardingScreen(
     LaunchedEffect(authState) {
         if (authState is AuthState.Success) {
             onLoginSuccess()
-        } else if ((authState is AuthState.Idle) || (authState is AuthState.Error)) {
+            // Reset to idle so that returning to this screen doesn't auto-navigate
+            viewModel.resetAuthState()
+        } else if ((authState is AuthState.Idle) || (authState is AuthState.Error) || (authState is AuthState.LoggedOut)) {
             loadingSource = null // Reset loading source when done or error
         }
     }

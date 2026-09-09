@@ -6,27 +6,45 @@ import com.zamnia.quizapp.ZamniaEngine
 import com.zamnia.quizapp.data.model.User
 import com.zamnia.quizapp.ui.zamnia.ActiveSubject
 import androidx.compose.ui.graphics.Color
+import io.github.jan.supabase.auth.auth
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
-import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.ExperimentalCoroutinesApi
 
+@OptIn(ExperimentalCoroutinesApi::class)
 class DashboardViewModel : ViewModel() {
     private val repository = ZamniaEngine.repository
 
-    private val _userProfile = MutableStateFlow<User?>(null)
-    val userProfile: StateFlow<User?> = _userProfile.asStateFlow()
+    val userProfile: StateFlow<User?> = repository.getUserProfileStream()
+        .onStart { 
+            // Only start loading if the user is authenticated
+            if (ZamniaEngine.supabase.auth.currentUserOrNull() != null) {
+                _isLoading.value = true 
+            } else {
+                _isLoading.value = false
+            }
+        }
+        .onEach { _isLoading.value = false }
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = null
+        )
 
     // Dynamic list of active subjects based on downloads and progress
     val activeSubjects: StateFlow<List<ActiveSubject>> = repository.getAllDownloadedPackages()
+        .distinctUntilChanged()
         .flatMapLatest { downloadedList ->
+            // Prevent processing if the user is not authenticated
+            if (ZamniaEngine.supabase.auth.currentUserOrNull() == null) {
+                return@flatMapLatest flowOf(emptyList<ActiveSubject>())
+            }
             if (downloadedList.isEmpty()) return@flatMapLatest flowOf(emptyList())
 
             val subjectFlows = downloadedList.groupBy { it.subject.trim().lowercase() }.map { (subjectName, packages) ->
                 // For each subject, sum up progress from all its packages
                 val packageProgressFlows = packages.map { pkg ->
                     repository.getProgressForPackage(pkg.packageId).map { answeredCount ->
-                        // Debug log to confirm progress is being read
-                        android.util.Log.d("DashboardVM", "Package ${pkg.packageId}: Answered $answeredCount / ${pkg.totalMcqs}")
                         answeredCount to pkg.totalMcqs
                     }
                 }
@@ -57,37 +75,23 @@ class DashboardViewModel : ViewModel() {
             }
 
             combine(subjectFlows) { it.toList() }
-        }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+        }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _isLoading = MutableStateFlow(true)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     init {
-        loadUserProfile()
-        syncCleanup()
+        // Only trigger sync cleanup if the user is authenticated
+        if (ZamniaEngine.supabase.auth.currentUserOrNull() != null) {
+            syncCleanup()
+        }
     }
 
     private fun syncCleanup() {
         viewModelScope.launch {
             repository.syncAndCleanupPacks()
-        }
-    }
-
-    fun loadUserProfile() {
-        viewModelScope.launch {
-            val auth = com.zamnia.quizapp.ZamniaEngine.supabase.auth
-            val currentUser = auth.currentUserOrNull()
-            
-            if (currentUser != null) {
-                _isLoading.value = true
-                repository.getUserProfileStream().collect { profile ->
-                    _userProfile.value = profile
-                    _isLoading.value = false
-                }
-            } else {
-                _userProfile.value = null
-                _isLoading.value = false
-            }
         }
     }
 }
