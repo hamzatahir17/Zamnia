@@ -1,5 +1,6 @@
 package com.zamnia.quizapp.ui.zamnia
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -158,15 +159,9 @@ fun ZamniaDashboardScreen(
                     // Filter subjects that actually exist in available packs (online or offline)
                     val discoveredSubjects = activeSubjects.map { it.name }.distinct()
                     
-                    discoveredSubjects.take(2).forEach { subjectName ->
+                    discoveredSubjects.take(2).forEachIndexed { index, subjectName ->
                         val isDownloaded = activeSubjects.any { it.name == subjectName }
-                        val color = when(subjectName.lowercase()) {
-                            "physics" -> Color(0xFF4CAF50)
-                            "biology" -> Color(0xFFE91E63)
-                            "mathematics", "math" -> Color(0xFFF44336)
-                            "chemistry" -> Color(0xFFFF9800)
-                            else -> MaterialTheme.colorScheme.primary
-                        }
+                        val themeColor = if (index == 0) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
 
                         val title = when(subjectName.lowercase()) {
                             "physics" -> "1st Year Physics"
@@ -184,7 +179,7 @@ fun ZamniaDashboardScreen(
                                 "mathematics", "math" -> Icons.Default.Functions
                                 else -> Icons.Default.School
                             },
-                            color = color,
+                            color = themeColor,
                             modifier = Modifier.weight(1f),
                             isDownloaded = isDownloaded,
                             onClick = { 
@@ -230,13 +225,14 @@ fun WelcomeSection(name: String) {
 
 @Composable
 fun ActiveCourseCard(title: String, level: String, progress: Float, color: Color, onClick: () -> Unit) {
+    val themeColor = MaterialTheme.colorScheme.primary
     Card(
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = color.copy(alpha = 0.12f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
         ),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f)),
+        border = BorderStroke(1.dp, themeColor.copy(alpha = 0.3f)),
         onClick = onClick
     ) {
         Row(
@@ -245,14 +241,14 @@ fun ActiveCourseCard(title: String, level: String, progress: Float, color: Color
         ) {
             Column(modifier = Modifier.weight(1f)) {
                 Surface(
-                    color = color.copy(alpha = 0.2f),
+                    color = themeColor.copy(alpha = 0.2f),
                     shape = CircleShape
                 ) {
                     Text(
                         text = title.uppercase(),
                         modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp),
                         style = MaterialTheme.typography.labelSmall,
-                        color = color,
+                        color = themeColor,
                         fontWeight = FontWeight.Bold
                     )
                 }
@@ -265,7 +261,7 @@ fun ActiveCourseCard(title: String, level: String, progress: Float, color: Color
                 Spacer(modifier = Modifier.height(16.dp))
                 Button(
                     onClick = onClick,
-                    colors = ButtonDefaults.buttonColors(containerColor = color),
+                    colors = ButtonDefaults.buttonColors(containerColor = themeColor),
                     shape = CircleShape,
                     contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp)
                 ) {
@@ -280,14 +276,14 @@ fun ActiveCourseCard(title: String, level: String, progress: Float, color: Color
                     progress = { progress },
                     modifier = Modifier.size(75.dp),
                     strokeWidth = 6.dp,
-                    color = color,
-                    trackColor = color.copy(alpha = 0.1f)
+                    color = themeColor,
+                    trackColor = themeColor.copy(alpha = 0.15f)
                 )
                 Text(
                     text = "${(progress * 100).toInt()}%",
                     style = MaterialTheme.typography.labelLarge,
                     fontWeight = FontWeight.Bold,
-                    color = if (progress > 0f) color else MaterialTheme.colorScheme.onSurfaceVariant
+                    color = if (progress > 0f) themeColor else MaterialTheme.colorScheme.onSurfaceVariant
                 )
             }
         }
@@ -307,8 +303,9 @@ fun SmallCourseCard(
         modifier = modifier.height(160.dp),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
         ),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.3f)),
         onClick = onClick
     ) {
         Column(
@@ -368,9 +365,9 @@ fun DailyChallengeBanner(onClick: () -> Unit) {
         modifier = Modifier.fillMaxWidth(),
         shape = RoundedCornerShape(24.dp),
         colors = CardDefaults.cardColors(
-            containerColor = color.copy(alpha = 0.12f)
+            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
         ),
-        border = androidx.compose.foundation.BorderStroke(1.dp, color.copy(alpha = 0.2f)),
+        border = BorderStroke(1.dp, color.copy(alpha = 0.3f)),
         onClick = onClick
     ) {
         Row(
