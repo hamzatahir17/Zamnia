@@ -1,5 +1,6 @@
 package com.zamnia.quizapp.ui.zamnia
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
@@ -51,7 +52,13 @@ fun ZamniaOnboardingScreen(
             onLoginSuccess()
             // Reset to idle so that returning to this screen doesn't auto-navigate
             viewModel.resetAuthState()
-        } else if ((authState is AuthState.Idle) || (authState is AuthState.Error) || (authState is AuthState.LoggedOut)) {
+        } else if (authState is AuthState.Error) {
+            val msg = (authState as AuthState.Error).message
+            if (msg.isNotBlank() && !msg.contains("cancel", ignoreCase = true)) {
+                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
+            }
+            loadingSource = null
+        } else if ((authState is AuthState.Idle) || (authState is AuthState.LoggedOut)) {
             loadingSource = null // Reset loading source when done or error
         }
     }
@@ -116,15 +123,6 @@ fun ZamniaOnboardingScreen(
                 ),
                 textAlign = TextAlign.Center
             )
-
-            if (authState is AuthState.Error) {
-                Text(
-                    text = (authState as AuthState.Error).message,
-                    color = MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.labelSmall,
-                    modifier = Modifier.padding(top = 8.dp)
-                )
-            }
 
             Spacer(modifier = Modifier.height(16.dp))
 

@@ -119,13 +119,20 @@ class AuthViewModel : ViewModel() {
                 }
                 _authState.value = AuthState.Success
             } catch (e: Exception) {
-                Log.e("AuthViewModel", "Google Sign-In Error: ${e.message}", e)
-                val friendlyMessage = when {
-                    e is ApiException -> "Google Sign-In error (Code ${e.statusCode})"
-                    e.message?.contains("network", ignoreCase = true) == true -> "No internet connection"
-                    else -> "Authentication failed: ${e.localizedMessage}"
+                Log.d("AuthViewModel", "Google Sign-In Intent Error: ${e.message}")
+                val isCancelled = (e is ApiException && (e.statusCode == 12501 || e.statusCode == 16 || e.statusCode == 12500)) ||
+                                  e.message?.contains("cancel", ignoreCase = true) == true
+                
+                if (isCancelled) {
+                    Log.d("AuthViewModel", "Google Sign-In cancelled by user, resetting to Idle")
+                    _authState.value = AuthState.Idle
+                } else {
+                    val friendlyMessage = when {
+                        e.message?.contains("network", ignoreCase = true) == true -> "No internet connection"
+                        else -> "Sign-in unavailable. Please try again."
+                    }
+                    _authState.value = AuthState.Error(friendlyMessage)
                 }
-                _authState.value = AuthState.Error(friendlyMessage)
             }
         }
     }
@@ -218,8 +225,19 @@ class AuthViewModel : ViewModel() {
                     onFallback()
                 }
             } catch (e: Exception) {
-                Log.w("AuthViewModel", "CredentialManager exception: ${e.message}, invoking fallback...")
-                onFallback()
+                Log.d("AuthViewModel", "CredentialManager exception: ${e.message}")
+                val isCancelled = e.javaClass.simpleName.contains("Cancellation", ignoreCase = true) ||
+                                  e.message?.contains("cancel", ignoreCase = true) == true ||
+                                  e.message?.contains("16") == true ||
+                                  e.message?.contains("12501") == true
+                
+                if (isCancelled) {
+                    Log.d("AuthViewModel", "User cancelled CredentialManager, resetting to Idle")
+                    _authState.value = AuthState.Idle
+                } else {
+                    Log.w("AuthViewModel", "CredentialManager failed with non-cancel error, invoking fallback...")
+                    onFallback()
+                }
             }
         }
     }
