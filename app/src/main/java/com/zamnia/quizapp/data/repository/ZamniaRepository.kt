@@ -88,6 +88,9 @@ class ZamniaRepository(
                                     unlockedThemesCsv = remoteUser.unlockedThemes.ifEmpty { listOf("default") }.joinToString(",")
                                 )
                             )
+                        } else {
+                            Log.w("ZamniaRepository", "User $uid deleted from remote database! Clearing local cache...")
+                            userDao.deleteUserById(uid)
                         }
                     }
                 } catch (e: Exception) {
@@ -119,8 +122,39 @@ class ZamniaRepository(
         }
     }
 
+    suspend fun getAnyLocalUser(): User? {
+        val entity = userDao.getAnyUserSync() ?: return null
+        return User(
+            uid = entity.userId,
+            userId = entity.publicId,
+            displayName = entity.name,
+            email = entity.email,
+            coinBalance = entity.coins,
+            activeThemeId = entity.activeThemeId,
+            unlockedThemes = entity.unlockedThemesCsv.split(",").filter { id -> id.isNotBlank() }.ifEmpty { listOf("default") }
+        )
+    }
+
+    suspend fun migrateGuestToUser(guestUid: String, newUser: User) {
+        Log.d("ZamniaRepository", "Migrating guest $guestUid to new user ${newUser.uid} (${newUser.email})...")
+        
+        // 1. First save new upgraded user profile to Supabase & Room DB
+        saveUserProfile(newUser)
+
+        // 2. Delete old guest row from remote Supabase public.users table via RPC / Postgrest
+        supabase.migrateGuestUserRpc(guestUid)
+
+        // 3. Delete old guest row from local Room DB
+        userDao.deleteUserById(guestUid)
+    }
+
     suspend fun saveUserProfile(user: User) {
-        supabase.saveUserProfile(user)
+        try {
+            supabase.saveUserProfile(user)
+        } catch (e: Exception) {
+            Log.w("ZamniaRepository", "saveUserProfile remote error: ${e.message}")
+        }
+
         userDao.insertUser(
             UserEntity(
                 userId = user.uid,

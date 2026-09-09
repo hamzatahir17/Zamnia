@@ -71,6 +71,9 @@ class AuthViewModel : ViewModel() {
         viewModelScope.launch {
             _authState.value = AuthState.Loading
             try {
+                // Capture guest profile before signing into Google
+                val guestProfileBeforeAuth = repository.getAnyLocalUser()
+
                 val task = GoogleSignIn.getSignedInAccountFromIntent(data)
                 val account = task.getResult(ApiException::class.java)
                 val idToken = account?.idToken ?: throw Exception("No ID Token received from Google")
@@ -82,23 +85,37 @@ class AuthViewModel : ViewModel() {
                     provider = Google
                 }
 
-                val uid = client.auth.currentUserOrNull()?.id ?: ""
+                val newUid = client.auth.currentUserOrNull()?.id ?: ""
                 val email = client.auth.currentUserOrNull()?.email ?: ""
+                val realName = account.displayName 
+                    ?: email.substringBefore("@").takeIf { it.isNotEmpty() }
+                    ?: "Explorer"
 
-                val existingProfile = repository.getUserProfile()
-                if (existingProfile == null) {
-                    val realName = account.displayName 
-                        ?: email.substringBefore("@").takeIf { it.isNotEmpty() }
-                        ?: "Explorer"
-
-                    val user = User(
-                        uid = uid,
-                        userId = null, 
+                if (guestProfileBeforeAuth != null && guestProfileBeforeAuth.isGuest) {
+                    Log.d("AuthViewModel", "Migrating Guest Account (${guestProfileBeforeAuth.uid}) data to new Google UID $newUid ($email)...")
+                    
+                    val migratedUser = User(
+                        uid = newUid,
+                        userId = null,
                         email = email,
                         displayName = realName,
-                        coinBalance = 0L
+                        coinBalance = guestProfileBeforeAuth.coinBalance,
+                        activeThemeId = guestProfileBeforeAuth.activeThemeId,
+                        unlockedThemes = guestProfileBeforeAuth.unlockedThemes
                     )
-                    repository.saveUserProfile(user)
+                    repository.migrateGuestToUser(guestProfileBeforeAuth.uid, migratedUser)
+                } else {
+                    val existingRemote = repository.getUserProfile()
+                    if (existingRemote == null) {
+                        val user = User(
+                            uid = newUid,
+                            userId = null, 
+                            email = email,
+                            displayName = realName,
+                            coinBalance = 0L
+                        )
+                        repository.saveUserProfile(user)
+                    }
                 }
                 _authState.value = AuthState.Success
             } catch (e: Exception) {
@@ -149,6 +166,9 @@ class AuthViewModel : ViewModel() {
                 if (googleIdTokenCredential != null) {
                     Log.d("AuthViewModel", "Google ID Token received via CredentialManager, signing into Supabase...")
                     
+                    // Capture guest profile before signing into Google
+                    val guestProfileBeforeAuth = repository.getAnyLocalUser()
+
                     try {
                         client.auth.signInWith(IDToken) {
                             idToken = googleIdTokenCredential.idToken
@@ -160,23 +180,37 @@ class AuthViewModel : ViewModel() {
                         return@launch
                     }
                     
-                    val uid = client.auth.currentUserOrNull()?.id ?: ""
+                    val newUid = client.auth.currentUserOrNull()?.id ?: ""
                     val email = client.auth.currentUserOrNull()?.email ?: ""
+                    val realName = googleIdTokenCredential.displayName 
+                        ?: email.substringBefore("@").takeIf { it.isNotEmpty() }
+                        ?: "Explorer"
                     
-                    val existingProfile = repository.getUserProfile()
-                    if (existingProfile == null) {
-                        val realName = googleIdTokenCredential.displayName 
-                            ?: email.substringBefore("@").takeIf { it.isNotEmpty() }
-                            ?: "Explorer"
-
-                        val user = User(
-                            uid = uid,
-                            userId = null, 
+                    if (guestProfileBeforeAuth != null && guestProfileBeforeAuth.isGuest) {
+                        Log.d("AuthViewModel", "Migrating Guest Account (${guestProfileBeforeAuth.uid}) data to new Google UID $newUid ($email)...")
+                        
+                        val migratedUser = User(
+                            uid = newUid,
+                            userId = null,
                             email = email,
                             displayName = realName,
-                            coinBalance = 0L
+                            coinBalance = guestProfileBeforeAuth.coinBalance,
+                            activeThemeId = guestProfileBeforeAuth.activeThemeId,
+                            unlockedThemes = guestProfileBeforeAuth.unlockedThemes
                         )
-                        repository.saveUserProfile(user)
+                        repository.migrateGuestToUser(guestProfileBeforeAuth.uid, migratedUser)
+                    } else {
+                        val existingRemote = repository.getUserProfile()
+                        if (existingRemote == null) {
+                            val user = User(
+                                uid = newUid,
+                                userId = null, 
+                                email = email,
+                                displayName = realName,
+                                coinBalance = 0L
+                            )
+                            repository.saveUserProfile(user)
+                        }
                     }
                     _authState.value = AuthState.Success
                 } else {
@@ -201,11 +235,12 @@ class AuthViewModel : ViewModel() {
                 if (existingProfile == null) {
                     val guestUser = User(
                         uid = uid,
-                        // userId is null so Supabase can generate it automatically
                         userId = null, 
                         email = "guest@zamnia.com",
                         displayName = "Guest Explorer",
-                        coinBalance = 0L
+                        coinBalance = 0L,
+                        activeThemeId = "default",
+                        unlockedThemes = listOf("default")
                     )
                     repository.saveUserProfile(guestUser)
                 }
@@ -255,15 +290,18 @@ class AuthViewModel : ViewModel() {
             Log.d("AuthViewModel", "Session check: CurrentUser=${currentUser?.id}, HasLocalUser=$hasLocalUser")
 
             // 4. Determine persistent login state:
-            // If logged in via Supabase OR saved in local Room DB -> STAY LOGGED IN!
-            if (currentUser != null || hasLocalUser) {
-                launch {
-                    try {
-                        repository.verifyRemoteSession()
-                    } catch (e: Exception) {
-                        Log.w("AuthViewModel", "Background session verify error: ${e.message}")
-                    }
+            if (currentUser != null) {
+                val isRemoteValid = repository.verifyRemoteSession()
+                if (!isRemoteValid) {
+                    Log.w("AuthViewModel", "Remote user was deleted from database! Signing out...")
+                    repository.clearAllLocalData()
+                    try { client.auth.signOut() } catch (e: Exception) { }
+                    return@withContext false
                 }
+                return@withContext true
+            }
+
+            if (hasLocalUser) {
                 return@withContext true
             }
 
