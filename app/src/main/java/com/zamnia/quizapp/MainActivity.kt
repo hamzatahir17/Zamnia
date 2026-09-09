@@ -20,6 +20,7 @@ import com.zamnia.quizapp.ui.theme.ZamniaTheme
 
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
+import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,15 +37,20 @@ class MainActivity : ComponentActivity() {
                 ) {
                     composable("splash") {
                         val authViewModel: AuthViewModel = viewModel()
+                        val scope = androidx.compose.runtime.rememberCoroutineScope()
+
                         ZamniaSplashScreen(
                             onSplashFinished = {
-                                if (authViewModel.isUserLoggedIn()) {
-                                    navController.navigate("dashboard") {
-                                        popUpTo("splash") { inclusive = true }
-                                    }
-                                } else {
-                                    navController.navigate("onboarding") {
-                                        popUpTo("splash") { inclusive = true }
+                                scope.launch {
+                                    val isValid = authViewModel.validateSession()
+                                    if (isValid) {
+                                        navController.navigate("dashboard") {
+                                            popUpTo("splash") { inclusive = true }
+                                        }
+                                    } else {
+                                        navController.navigate("onboarding") {
+                                            popUpTo("splash") { inclusive = true }
+                                        }
                                     }
                                 }
                             }

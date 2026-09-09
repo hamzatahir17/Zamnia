@@ -112,6 +112,29 @@ class AuthViewModel : ViewModel() {
 
     fun isUserLoggedIn(): Boolean = client.auth.currentUserOrNull() != null
 
+    /**
+     * Validates the current session against the backend.
+     * If the user profile cannot be found (e.g. user deleted), it signs out.
+     */
+    suspend fun validateSession(): Boolean {
+        if (client.auth.currentUserOrNull() == null) return false
+        
+        return try {
+            // Force verify against Remote Supabase Database
+            val isRemoteValid = repository.verifyRemoteSession()
+            if (!isRemoteValid) {
+                client.auth.signOut()
+                false
+            } else {
+                true
+            }
+        } catch (e: Exception) {
+            // If network fails, we allow the cached session for offline play
+            android.util.Log.e("AuthViewModel", "Network error during validation: ${e.message}")
+            true 
+        }
+    }
+
     fun logout() {
         viewModelScope.launch {
             client.auth.signOut()

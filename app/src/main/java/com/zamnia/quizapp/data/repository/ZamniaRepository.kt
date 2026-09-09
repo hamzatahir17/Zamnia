@@ -14,7 +14,6 @@ class ZamniaRepository(
     private val packageDao: PackageDao,
     private val quizDao: QuizDao,
     private val userDao: UserDao,
-    private val syncDao: SyncDao,
     private val userPrefsDao: UserPrefsDao
 ) {
     // --- User Profile & Coins ---
@@ -82,6 +81,25 @@ class ZamniaRepository(
                 coinBalance = it.coins,
                 activeThemeId = it.activeThemeId
             )
+        }
+    }
+
+    /**
+     * Specifically checks if the user exists on the server.
+     * If not found, it clears the local user data.
+     */
+    suspend fun verifyRemoteSession(): Boolean {
+        val uid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return false
+        val remoteUser = supabase.getUserProfile(uid)
+        
+        return if (remoteUser == null) {
+            // User deleted from Supabase, clear local cache
+            userDao.deleteUserById(uid)
+            false
+        } else {
+            // Sync local with latest remote data
+            saveUserProfile(remoteUser)
+            true
         }
     }
 
