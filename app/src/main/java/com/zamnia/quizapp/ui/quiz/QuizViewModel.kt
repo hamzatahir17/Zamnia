@@ -71,10 +71,10 @@ class QuizViewModel : ViewModel() {
                     } else {
                         _questions.value = localQuestions.map { lq ->
                             Question(
-                                id = lq.id.toLongOrNull() ?: 0L,
+                                id = lq.id.toLongOrNull(),
                                 question = lq.questionText,
                                 options = listOf(lq.optionA, lq.optionB, lq.optionC, lq.optionD),
-                                correctAnswerIndex = lq.correctOption,
+                                correctAnswer = lq.correctOption,
                                 category = lq.subject
                             )
                         }
@@ -84,14 +84,7 @@ class QuizViewModel : ViewModel() {
                     _hasNoQuestions.value = true
                 }
             } else {
-                val remoteQuestions = repository.getQuestions()
-                if (remoteQuestions.isEmpty()) {
-                    _hasNoQuestions.value = true
-                } else {
-                    // Limit to 20 random questions even for general mode
-                    _questions.value = remoteQuestions.shuffled().take(20)
-                    resetAndStart()
-                }
+                _hasNoQuestions.value = true
             }
         }
     }
@@ -119,11 +112,18 @@ class QuizViewModel : ViewModel() {
         }
     }
 
+    private @Volatile var isSubmittingAnswer = false
+
     fun submitAnswer(selectedIndex: Int) {
-        if (_selectedAnswer.value != null || _isFinished.value) return
+        if (isSubmittingAnswer || _selectedAnswer.value != null || _isFinished.value) return
+        isSubmittingAnswer = true
         
         timerJob?.cancel()
-        val currentQuestion = _questions.value.getOrNull(_currentQuestionIndex.value) ?: return
+        val currentQuestion = _questions.value.getOrNull(_currentQuestionIndex.value)
+        if (currentQuestion == null) {
+            isSubmittingAnswer = false
+            return
+        }
         
         val isCorrect = selectedIndex == currentQuestion.correctAnswerIndex
         _selectedAnswer.value = selectedIndex
@@ -138,28 +138,33 @@ class QuizViewModel : ViewModel() {
             }
         } else {
             if (isOnline.value) {
-                _coinsEarned.value -= 5
+                // Prevent negative total coins earned
+                _coinsEarned.value = (_coinsEarned.value - 5).coerceAtLeast(-50)
             }
         }
 
         viewModelScope.launch {
-            if (isOnline.value) {
-                repository.submitQuizAnswer(isCorrect)
-            }
-            
-            currentPackageId?.let { pkgId ->
-                repository.saveQuestionProgress(currentQuestion.id.toString(), pkgId, isCorrect)
-            }
-            
-            delay(1200) // Show results for 1.2 seconds
-            
-            if (_currentQuestionIndex.value < _questions.value.size - 1) {
-                _selectedAnswer.value = null
-                _currentQuestionIndex.value++
-                startTimer()
-            } else {
-                _isFinished.value = true
-                repository.saveQuizHistory(_score.value, _questions.value.size, _coinsEarned.value)
+            try {
+                if (isOnline.value) {
+                    repository.submitQuizAnswer(isCorrect)
+                }
+                
+                currentPackageId?.let { pkgId ->
+                    repository.saveQuestionProgress(currentQuestion.id.toString(), pkgId, isCorrect)
+                }
+                
+                delay(1200) // Show results for 1.2 seconds
+                
+                if (_currentQuestionIndex.value < _questions.value.size - 1) {
+                    _selectedAnswer.value = null
+                    _currentQuestionIndex.value++
+                    startTimer()
+                } else {
+                    _isFinished.value = true
+                    repository.saveQuizHistory(_score.value, _questions.value.size, _coinsEarned.value)
+                }
+            } finally {
+                isSubmittingAnswer = false
             }
         }
     }

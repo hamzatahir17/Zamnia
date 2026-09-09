@@ -22,6 +22,8 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import com.zamnia.quizapp.R
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.zamnia.quizapp.ui.auth.AuthState
@@ -37,6 +39,12 @@ fun ZamniaOnboardingScreen(
     
     // Track which button was clicked
     var loadingSource by remember { mutableStateOf<String?>(null) }
+
+    val googleLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        viewModel.handleGoogleSignInResult(result.data)
+    }
 
     LaunchedEffect(authState) {
         if (authState is AuthState.Success) {
@@ -150,7 +158,9 @@ fun ZamniaOnboardingScreen(
                     Button(
                         onClick = { 
                             loadingSource = "google"
-                            viewModel.signInWithGoogle(context) 
+                            viewModel.signInWithGoogle(context) {
+                                googleLauncher.launch(viewModel.getGoogleSignInIntent(context))
+                            }
                         },
                         modifier = Modifier
                             .fillMaxWidth()

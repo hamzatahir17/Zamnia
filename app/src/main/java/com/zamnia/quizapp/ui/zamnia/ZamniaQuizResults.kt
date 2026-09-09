@@ -34,7 +34,9 @@ fun ZamniaQuizResultsScreen(
     onPlayAgain: () -> Unit = {},
     onReturnToDashboard: () -> Unit
 ) {
-    val percentage = if (total > 0) (score.toFloat() / total.toFloat() * 100).toInt() else 0
+    val percentage = remember(score, total) {
+        if (total > 0) ((score.coerceIn(0, total).toFloat() / total.toFloat()) * 100).toInt() else 0
+    }
     var showReview by remember { mutableStateOf(false) }
 
     Box(
@@ -78,7 +80,7 @@ fun ZamniaQuizResultsScreen(
                 ) {
                     Box(contentAlignment = Alignment.Center, modifier = Modifier.size(130.dp)) {
                         CircularProgressIndicator(
-                            progress = { percentage / 100f },
+                            progress = { (percentage / 100f).coerceIn(0f, 1f) },
                             modifier = Modifier.size(120.dp),
                             strokeWidth = 8.dp,
                             color = MaterialTheme.colorScheme.secondary,

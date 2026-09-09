@@ -16,7 +16,7 @@ import com.zamnia.quizapp.data.local.entities.*
         PendingSyncEntity::class,
         UserQuestionProgressEntity::class
     ],
-    version = 3, // Increment version for new table
+    version = 4, // Incremented version for unlockedThemesCsv column in UserEntity
     exportSchema = false
 )
 abstract class ZamniaDatabase : RoomDatabase() {

@@ -1,13 +1,23 @@
 package com.zamnia.quizapp.data.repository
 
+import android.util.Log
+import com.zamnia.quizapp.ZamniaEngine
 import com.zamnia.quizapp.data.local.dao.*
 import com.zamnia.quizapp.data.local.entities.*
 import com.zamnia.quizapp.data.model.Pack
+import com.zamnia.quizapp.data.model.Question
 import com.zamnia.quizapp.data.model.Theme
 import com.zamnia.quizapp.data.model.User
 import com.zamnia.quizapp.data.remote.SupabaseService
 import io.github.jan.supabase.auth.auth
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.channels.awaitClose
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.launch
 
 class ZamniaRepository(
     private val supabase: SupabaseService,
@@ -17,25 +27,93 @@ class ZamniaRepository(
     private val userDao: UserDao,
     private val userPrefsDao: UserPrefsDao
 ) {
-    // --- User Profile & Coins ---
+    private val repositoryScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var cachedProfileFlow: Flow<User?>? = null
+    private var cachedUid: String? = null
+
+    // --- User Profile & Coins (Realtime Sync) ---
     fun getUserProfileStream(): Flow<User?> {
-        val uid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return flowOf(null)
-        
-        return userDao.getUserById(uid).map { entity ->
-            entity?.let {
-                User(
-                    uid = it.userId,
-                    userId = it.publicId,
-                    displayName = it.name,
-                    email = it.email,
-                    coinBalance = it.coins,
-                    activeThemeId = it.activeThemeId
-                )
+        val currentUid = ZamniaEngine.supabase.auth.currentUserOrNull()?.id
+        if (cachedProfileFlow != null && cachedUid != null && cachedUid == currentUid) {
+            return cachedProfileFlow!!
+        }
+
+        cachedUid = currentUid
+
+        val flow = channelFlow {
+            // Coroutine 1: Observe Room local cache continuously for instant UI rendering & offline play
+            val localJob = launch {
+                userDao.getAllUsersFlow().collect { userList ->
+                    val activeUid = ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: cachedUid
+                    val entity = if (activeUid != null) {
+                        userList.firstOrNull { it.userId == activeUid } ?: userList.firstOrNull()
+                    } else {
+                        userList.firstOrNull()
+                    }
+
+                    val user = entity?.let {
+                        User(
+                            uid = it.userId,
+                            userId = it.publicId,
+                            displayName = it.name,
+                            email = it.email,
+                            coinBalance = it.coins,
+                            activeThemeId = it.activeThemeId,
+                            unlockedThemes = it.unlockedThemesCsv.split(",").filter { id -> id.isNotBlank() }.ifEmpty { listOf("default") }
+                        )
+                    }
+                    send(user)
+                }
+            }
+
+            // Coroutine 2: Listen to Supabase Realtime WebSocket for live server updates
+            val realtimeJob = launch {
+                try {
+                    var uid = ZamniaEngine.supabase.auth.currentUserOrNull()?.id
+                    while (uid == null) {
+                        delay(200)
+                        uid = ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: userDao.getAnyUserSync()?.userId
+                    }
+
+                    supabase.getUserProfileStream(uid).collect { remoteUser ->
+                        if (remoteUser != null) {
+                            userDao.insertUser(
+                                UserEntity(
+                                    userId = remoteUser.uid,
+                                    publicId = remoteUser.userId,
+                                    name = remoteUser.displayName ?: remoteUser.email.substringBefore("@"),
+                                    email = remoteUser.email,
+                                    coins = remoteUser.coinBalance ?: 0L,
+                                    activeThemeId = remoteUser.activeThemeId ?: "default",
+                                    unlockedThemesCsv = remoteUser.unlockedThemes.ifEmpty { listOf("default") }.joinToString(",")
+                                )
+                            )
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (e is CancellationException) throw e
+                    Log.w("ZamniaRepository", "Realtime profile stream error: ${e.message}")
+                }
+            }
+
+            awaitClose {
+                localJob.cancel()
+                realtimeJob.cancel()
             }
         }.distinctUntilChanged()
+        .shareIn(
+            scope = repositoryScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            replay = 1
+        )
+
+        cachedProfileFlow = flow
+        return flow
     }
 
     suspend fun clearAllLocalData() {
+        cachedProfileFlow = null
+        cachedUid = null
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             database.clearAllTables()
         }
@@ -47,10 +125,11 @@ class ZamniaRepository(
             UserEntity(
                 userId = user.uid,
                 publicId = user.userId,
-                name = user.displayName,
+                name = user.displayName ?: user.email.substringBefore("@"),
                 email = user.email,
-                coins = user.coinBalance,
-                activeThemeId = user.activeThemeId
+                coins = user.coinBalance ?: 0L,
+                activeThemeId = user.activeThemeId ?: "default",
+                unlockedThemesCsv = user.unlockedThemes.ifEmpty { listOf("default") }.joinToString(",")
             )
         )
     }
@@ -108,6 +187,10 @@ class ZamniaRepository(
         }
     }
 
+    suspend fun hasLocalUserSession(): Boolean {
+        return userDao.getAnyUserSync() != null
+    }
+
     suspend fun transferCoins(toPublicId: String, amount: Long): String {
         return supabase.transferCoinsRpc(toPublicId, amount)
     }
@@ -132,13 +215,13 @@ class ZamniaRepository(
     suspend fun syncAndCleanupPacks() {
         // Ensure user is authenticated before syncing
         if (com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull() == null) return
-        
+
         try {
             val result = supabase.getAvailablePacksForAllClasses()
             if (result.isSuccess) {
                 val remotePacks = result.getOrNull() ?: emptyList()
                 val validIds = remotePacks.map { it.id }
-                
+
                 if (validIds.isEmpty()) {
                     // If the server returns no packs, we wipe local cache to stay in sync
                     packageDao.cleanupAllPackages()
@@ -153,21 +236,25 @@ class ZamniaRepository(
 
     suspend fun downloadPackage(packageId: String, classLevel: Int, subject: String, chapter: String) {
         try {
-            // 1. Wipe old content FIRST to avoid mix-up
-            quizDao.deleteQuestionsByPackage(packageId)
-            quizDao.deleteProgressByPackage(packageId)
+            Log.d("ZamniaRepo", "Starting download for packageId: $packageId, class: $classLevel, subject: $subject, chapter: $chapter")
 
-            // 2. Fetch fresh MCQs from Supabase
+            // 1. Fetch fresh MCQs directly from Supabase
             val supabaseQuestions = supabase.getQuestionsByPackage(packageId)
+            Log.d("ZamniaRepo", "Fetched ${supabaseQuestions.size} questions from Supabase for $packageId")
+
             if (supabaseQuestions.isEmpty()) {
-                // If server is empty, we just leave it wiped
+                Log.w("ZamniaRepo", "No questions found on Supabase server for package $packageId")
                 return
             }
 
-            // 3. Map to Room Entities
+            // 2. Wipe old local content FIRST to avoid duplicates
+            quizDao.deleteQuestionsByPackage(packageId)
+            quizDao.deleteProgressByPackage(packageId)
+
+            // 3. Map Supabase MCQs to Room Entities
             val localQuestions = supabaseQuestions.map { q ->
                 QuizQuestionEntity(
-                    id = q.id.toString(),
+                    id = q.id?.toString() ?: "${packageId}_${q.question.hashCode()}",
                     packageId = packageId,
                     classLevel = classLevel,
                     subject = subject,
@@ -181,7 +268,7 @@ class ZamniaRepository(
                 )
             }
 
-            // 4. Update Package Metadata
+            // 4. Update Package Metadata in Room DB
             packageDao.insertPackage(
                 DownloadedPackageEntity(
                     packageId = packageId,
@@ -193,12 +280,12 @@ class ZamniaRepository(
                 )
             )
 
-            // 5. Insert fresh questions
+            // 5. Insert fresh questions batch into Room DB
             quizDao.insertQuestionsBatch(localQuestions)
             
-            android.util.Log.d("ZamniaRepo", "Sync Complete: $packageId with ${localQuestions.size} Qs")
+            Log.d("ZamniaRepo", "Download Complete: $packageId with ${localQuestions.size} Qs")
         } catch (e: Exception) {
-            android.util.Log.e("ZamniaRepository", "Download failed: ${e.message}")
+            Log.e("ZamniaRepository", "Download failed for $packageId: ${e.message}", e)
             throw e
         }
     }
@@ -213,8 +300,6 @@ class ZamniaRepository(
         val uid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return
         supabase.updateQuizCoins(uid, isCorrect)
     }
-
-    suspend fun getQuestions(): List<com.zamnia.quizapp.data.model.Question> = supabase.getQuestions()
 
     suspend fun saveQuizHistory(score: Int, total: Int, coins: Int) {
         quizDao.insertQuizResult(
@@ -240,11 +325,79 @@ class ZamniaRepository(
     fun getProgressForPackage(packageId: String): Flow<Int> = quizDao.getAnsweredCountForPackage(packageId)
 
     // --- Themes & Preferences ---
-    suspend fun getThemes(): List<Theme> = supabase.getThemes()
+    suspend fun getThemes(): List<Theme> {
+        return try {
+            val remoteThemes = supabase.getThemes()
+            val themesList = if (remoteThemes.isNotEmpty()) remoteThemes else getDefaultThemes()
+            themesList.map { t ->
+                if (t.id == "default") t.copy(price = 0)
+                else t.copy(price = 500)
+            }
+        } catch (e: Exception) {
+            Log.w("ZamniaRepository", "Supabase themes fetch failed, falling back to default themes: ${e.message}")
+            getDefaultThemes()
+        }
+    }
+
+    private fun getDefaultThemes(): List<Theme> = listOf(
+        Theme(id = "default", name = "Default Midnight", price = 0, primaryColor = "#6366F1", secondaryColor = "#4F46E5"),
+        Theme(id = "ocean_blue", name = "Ocean Blue", price = 500, primaryColor = "#0284C7", secondaryColor = "#0369A1"),
+        Theme(id = "emerald", name = "Emerald Green", price = 500, primaryColor = "#059669", secondaryColor = "#047857"),
+        Theme(id = "sunset", name = "Sunset Gold", price = 500, primaryColor = "#D97706", secondaryColor = "#B45309"),
+        Theme(id = "cyberpunk", name = "Cyber Neon", price = 500, primaryColor = "#EC4899", secondaryColor = "#D946EF")
+    )
 
     suspend fun purchaseTheme(themeId: String, price: Long): Result<Unit> {
         val uid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return Result.failure(Exception("Not logged in"))
-        return supabase.purchaseTheme(uid, themeId, price)
+        
+        // Check local balance first
+        val localUser = userDao.getUserById(uid).firstOrNull()
+        val currentCoins = localUser?.coins ?: 0L
+        val currentUnlocked = localUser?.unlockedThemesCsv?.split(",")?.filter { it.isNotBlank() }?.toMutableList() ?: mutableListOf("default")
+
+        if (!currentUnlocked.contains(themeId) && currentCoins < price) {
+            return Result.failure(Exception("Insufficient coins! Required: $price coins, You have: $currentCoins coins."))
+        }
+
+        val result = supabase.purchaseTheme(uid, themeId, price)
+        if (result.isSuccess) {
+            val remoteUser = supabase.getUserProfile(uid)
+            if (remoteUser != null) {
+                userDao.insertUser(
+                    UserEntity(
+                        userId = remoteUser.uid,
+                        publicId = remoteUser.userId,
+                        name = remoteUser.displayName ?: remoteUser.email.substringBefore("@"),
+                        email = remoteUser.email,
+                        coins = remoteUser.coinBalance ?: 0L,
+                        activeThemeId = remoteUser.activeThemeId ?: "default",
+                        unlockedThemesCsv = remoteUser.unlockedThemes.ifEmpty { listOf("default") }.joinToString(",")
+                    )
+                )
+            }
+        }
+        return result
+    }
+
+    suspend fun selectTheme(themeId: String): Result<Unit> {
+        val uid = ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return Result.failure(Exception("Not logged in"))
+        
+        // Instantly update local Room cache for 0ms UI feedback
+        val localUser = userDao.getUserById(uid).firstOrNull()
+        if (localUser != null) {
+            val currentUnlocked = localUser.unlockedThemesCsv.split(",").filter { it.isNotBlank() }.toMutableList()
+            if (!currentUnlocked.contains("default")) currentUnlocked.add("default")
+            if (!currentUnlocked.contains(themeId)) currentUnlocked.add(themeId)
+            
+            userDao.insertUser(
+                localUser.copy(
+                    activeThemeId = themeId,
+                    unlockedThemesCsv = currentUnlocked.joinToString(",")
+                )
+            )
+        }
+
+        return supabase.selectTheme(uid, themeId)
     }
 
     fun getUserPrefs(): Flow<LocalUserPrefs?> {

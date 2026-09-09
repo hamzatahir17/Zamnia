@@ -5,6 +5,7 @@ import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
 import android.net.NetworkRequest
+import android.util.Log
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
@@ -20,17 +21,17 @@ class NetworkObserver(context: Context) {
         val callback = object : ConnectivityManager.NetworkCallback() {
             override fun onAvailable(network: Network) {
                 super.onAvailable(network)
-                launch { send(true) }
+                trySend(true)
             }
 
             override fun onLost(network: Network) {
                 super.onLost(network)
-                launch { send(false) }
+                trySend(false)
             }
 
             override fun onUnavailable() {
                 super.onUnavailable()
-                launch { send(false) }
+                trySend(false)
             }
         }
 
@@ -38,16 +39,25 @@ class NetworkObserver(context: Context) {
             .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
             .build()
         
-        connectivityManager.registerNetworkCallback(request, callback)
+        try {
+            connectivityManager.registerNetworkCallback(request, callback)
+        } catch (e: Exception) {
+            Log.e("NetworkObserver", "Failed to register network callback: ${e.message}")
+            trySend(false)
+        }
         
         // Initial check
         val activeNetwork = connectivityManager.activeNetwork
         val capabilities = connectivityManager.getNetworkCapabilities(activeNetwork)
         val isInitiallyOnline = capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) == true
-        launch { send(isInitiallyOnline) }
+        trySend(isInitiallyOnline)
 
         awaitClose {
-            connectivityManager.unregisterNetworkCallback(callback)
+            try {
+                connectivityManager.unregisterNetworkCallback(callback)
+            } catch (e: Exception) {
+                Log.e("NetworkObserver", "Failed to unregister callback: ${e.message}")
+            }
         }
     }.distinctUntilChanged()
 }

@@ -1,6 +1,9 @@
 package com.zamnia.quizapp
 
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -21,17 +24,23 @@ import com.zamnia.quizapp.ui.theme.ZamniaTheme
 import androidx.navigation.NavType
 import androidx.navigation.navArgument
 import kotlinx.coroutines.launch
+import java.security.MessageDigest
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
         super.onCreate(savedInstanceState)
+        
+        printAppSignature()
+        
         enableEdgeToEdge()
         setContent {
-            ZamniaTheme {
+            val authViewModel: AuthViewModel = viewModel()
+            val userProfile by authViewModel.userProfile.collectAsState()
+            val activeThemeId = userProfile?.activeThemeId ?: "default"
+
+            ZamniaTheme(activeThemeId = activeThemeId) {
                 val navController = rememberNavController()
-                // Shared AuthViewModel for the entire app to avoid re-loading session
-                val authViewModel: AuthViewModel = viewModel()
                 
                 NavHost(
                     navController = navController,
@@ -148,7 +157,9 @@ class MainActivity : ComponentActivity() {
                                 packageId = idToPass,
                                 onBack = { navController.popBackStack() },
                                 onQuizFinished = { score, total, coins ->
-                                    navController.navigate("results/$score/$total/$coins/$packageId")
+                                    if (navController.currentDestination?.route?.contains("quiz") == true) {
+                                        navController.navigate("results/$score/$total/$coins/$packageId")
+                                    }
                                 },
                                 viewModel = quizViewModel
                             )
@@ -196,4 +207,39 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+
+    private fun printAppSignature() {
+        try {
+            val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                packageManager.getPackageInfo(
+                    packageName,
+                    PackageManager.GET_SIGNING_CERTIFICATES
+                )
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(
+                    packageName,
+                    PackageManager.GET_SIGNATURES
+                )
+            }
+
+            val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                info.signingInfo?.apkContentsSigners
+            } else {
+                @Suppress("DEPRECATION")
+                info.signatures
+            }
+
+            signatures?.forEach { sig ->
+                val md = MessageDigest.getInstance("SHA-1")
+                md.update(sig.toByteArray())
+                val digest = md.digest()
+                val hexString = digest.joinToString(":") { String.format("%02X", it) }
+                Log.e("ZamniaAppSignature", "ACTUAL RUNTIME SHA-1: $hexString")
+            }
+        } catch (e: Exception) {
+            Log.e("ZamniaAppSignature", "Error getting signature", e)
+        }
+    }
 }
+
