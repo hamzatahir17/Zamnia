@@ -114,12 +114,12 @@ class AuthViewModel : ViewModel() {
 
     /**
      * Validates the current session against the backend.
-     * If the user profile cannot be found (e.g. user deleted), it signs out.
+     * Uses Dispatchers.IO to ensure no UI thread freezing.
      */
-    suspend fun validateSession(): Boolean {
-        if (client.auth.currentUserOrNull() == null) return false
+    suspend fun validateSession(): Boolean = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        if (client.auth.currentUserOrNull() == null) return@withContext false
         
-        return try {
+        return@withContext try {
             // Force verify against Remote Supabase Database
             val isRemoteValid = repository.verifyRemoteSession()
             if (!isRemoteValid) {
@@ -129,7 +129,6 @@ class AuthViewModel : ViewModel() {
                 true
             }
         } catch (e: Exception) {
-            // If network fails, we allow the cached session for offline play
             android.util.Log.e("AuthViewModel", "Network error during validation: ${e.message}")
             true 
         }

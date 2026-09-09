@@ -30,20 +30,34 @@ class MainActivity : ComponentActivity() {
         setContent {
             ZamniaTheme {
                 val navController = rememberNavController()
+                // Shared AuthViewModel for the entire app to avoid re-loading session
+                val authViewModel: AuthViewModel = viewModel()
                 
                 NavHost(
                     navController = navController,
                     startDestination = "splash"
                 ) {
                     composable("splash") {
-                        val authViewModel: AuthViewModel = viewModel()
                         val scope = androidx.compose.runtime.rememberCoroutineScope()
+                        
+                        // Start validation IMMEDIATELY when Splash composable enters the screen
+                        // This result will be ready by the time animation finishes.
+                        val validationResult = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Boolean?>(null) }
+                        
+                        androidx.compose.runtime.LaunchedEffect(Unit) {
+                            validationResult.value = authViewModel.validateSession()
+                        }
 
                         ZamniaSplashScreen(
                             onSplashFinished = {
                                 scope.launch {
-                                    val isValid = authViewModel.validateSession()
-                                    if (isValid) {
+                                    // If result is not ready (slow network), it will wait here briefly.
+                                    // If already ready, it navigates instantly.
+                                    while (validationResult.value == null) {
+                                        kotlinx.coroutines.delay(100)
+                                    }
+                                    
+                                    if (validationResult.value == true) {
                                         navController.navigate("dashboard") {
                                             popUpTo("splash") { inclusive = true }
                                         }
@@ -62,7 +76,8 @@ class MainActivity : ComponentActivity() {
                                 navController.navigate("dashboard") {
                                     popUpTo("onboarding") { inclusive = true }
                                 }
-                            }
+                            },
+                            viewModel = authViewModel
                         )
                     }
                     composable("dashboard") {

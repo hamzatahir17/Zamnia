@@ -71,7 +71,12 @@ class PacksViewModel : ViewModel() {
 
     private fun loadPacksForClass(level: Int) {
         viewModelScope.launch {
-            _availablePacks.value = repository.getAvailablePacks(level)
+            try {
+                _availablePacks.value = repository.getAvailablePacks(level)
+            } catch (e: Exception) {
+                android.util.Log.e("PacksVM", "Failed to fetch available packs: ${e.message}")
+                _error.value = "Offline Mode: Showing downloaded packs only."
+            }
         }
     }
 

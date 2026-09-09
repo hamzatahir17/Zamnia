@@ -31,8 +31,18 @@ class SettingsViewModel : ViewModel() {
 
     private fun loadData() {
         viewModelScope.launch {
-            _userProfile.value = repository.getUserProfile()
-            _availableThemes.value = repository.getThemes()
+            try {
+                _userProfile.value = repository.getUserProfile()
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsVM", "Profile load failed: ${e.message}")
+            }
+
+            try {
+                _availableThemes.value = repository.getThemes()
+            } catch (e: Exception) {
+                android.util.Log.e("SettingsVM", "Themes load failed: ${e.message}")
+            }
+
             repository.getAllQuizHistory().collect {
                 _quizHistory.value = it
             }

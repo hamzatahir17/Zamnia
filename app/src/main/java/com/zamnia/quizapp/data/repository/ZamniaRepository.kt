@@ -68,12 +68,19 @@ class ZamniaRepository(
 
     suspend fun getUserProfile(): User? {
         val uid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return null
-        val remoteUser = supabase.getUserProfile(uid)
-        if (remoteUser != null) {
-            saveUserProfile(remoteUser)
-            return remoteUser
+        
+        try {
+            val remoteUser = supabase.getUserProfile(uid)
+            if (remoteUser != null) {
+                saveUserProfile(remoteUser)
+                return remoteUser
+            }
+        } catch (e: Exception) {
+            android.util.Log.w("ZamniaRepository", "Failed to fetch remote profile, falling back to local: ${e.message}")
         }
-        return userDao.getUserById(uid).first()?.let {
+
+        // Fallback to local Room Database
+        return userDao.getUserById(uid).firstOrNull()?.let {
             User(
                 uid = it.userId,
                 displayName = it.name,
@@ -86,19 +93,27 @@ class ZamniaRepository(
 
     /**
      * Specifically checks if the user exists on the server.
-     * If not found, it clears the local user data.
+     * Returns true if user exists OR if there is a network error (to allow offline play).
+     * Returns false ONLY if the user is explicitly missing from the database.
      */
     suspend fun verifyRemoteSession(): Boolean {
         val uid = com.zamnia.quizapp.ZamniaEngine.supabase.auth.currentUserOrNull()?.id ?: return false
-        val remoteUser = supabase.getUserProfile(uid)
         
-        return if (remoteUser == null) {
-            // User deleted from Supabase, clear local cache
-            userDao.deleteUserById(uid)
-            false
-        } else {
-            // Sync local with latest remote data
-            saveUserProfile(remoteUser)
+        return try {
+            val remoteUser = supabase.getUserProfile(uid)
+            if (remoteUser == null) {
+                // Confirmed: User deleted from database
+                userDao.deleteUserById(uid)
+                false
+            } else {
+                // Sync local cache
+                saveUserProfile(remoteUser)
+                true
+            }
+        } catch (e: Exception) {
+            // Network error occurred. We DON'T logout. 
+            // We return true to allow the user to continue using cached data.
+            android.util.Log.w("ZamniaRepository", "Network error during session verify: ${e.message}")
             true
         }
     }
