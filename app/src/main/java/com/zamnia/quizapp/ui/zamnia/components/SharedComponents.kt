@@ -95,33 +95,45 @@ fun ZamniaBottomNavigation(
     onNavigateToSettings: () -> Unit,
     onNavigateToPacks: () -> Unit
 ) {
+    val navColors = NavigationBarItemDefaults.colors(
+        selectedIconColor = MaterialTheme.colorScheme.onPrimary,
+        selectedTextColor = MaterialTheme.colorScheme.primary,
+        indicatorColor = MaterialTheme.colorScheme.primary,
+        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)
+    )
+
     NavigationBar(
-        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.8f),
+        containerColor = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
         tonalElevation = 8.dp
     ) {
         NavigationBarItem(
             selected = currentRoute == "hub",
             onClick = onNavigateToHub,
             icon = { Icon(Icons.Default.GridView, contentDescription = null) },
-            label = { Text("Hub") }
+            label = { Text("Hub", fontWeight = FontWeight.Bold) },
+            colors = navColors
         )
         NavigationBarItem(
             selected = currentRoute == "packs",
             onClick = onNavigateToPacks,
             icon = { Icon(Icons.Default.DownloadForOffline, contentDescription = null) },
-            label = { Text("Packs") }
+            label = { Text("Packs", fontWeight = FontWeight.Bold) },
+            colors = navColors
         )
         NavigationBarItem(
             selected = currentRoute == "wallet",
             onClick = onNavigateToWallet,
             icon = { Icon(Icons.Default.AccountBalanceWallet, contentDescription = null) },
-            label = { Text("Wallet") }
+            label = { Text("Wallet", fontWeight = FontWeight.Bold) },
+            colors = navColors
         )
         NavigationBarItem(
             selected = currentRoute == "settings",
             onClick = onNavigateToSettings,
             icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-            label = { Text("Settings") }
+            label = { Text("Settings", fontWeight = FontWeight.Bold) },
+            colors = navColors
         )
     }
 }

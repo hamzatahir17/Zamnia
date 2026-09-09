@@ -7,9 +7,11 @@ import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.compose.runtime.LaunchedEffect
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -28,7 +30,7 @@ import java.security.MessageDigest
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splashScreen = installSplashScreen()
         super.onCreate(savedInstanceState)
         
         printAppSignature()
@@ -39,56 +41,36 @@ class MainActivity : ComponentActivity() {
             val userProfile by authViewModel.userProfile.collectAsState()
             val activeThemeId = userProfile?.activeThemeId ?: "default"
 
+            // Fast direct routing based on session validation (No artificial Compose splash delay)
+            val startDestination = remember { mutableStateOf<String?>(null) }
+
+            // Keep native splash screen visible until destination is determined (Eliminates white flash)
+            splashScreen.setKeepOnScreenCondition { startDestination.value == null }
+
+            LaunchedEffect(Unit) {
+                val isValid = authViewModel.validateSession()
+                startDestination.value = if (isValid) "dashboard" else "onboarding"
+            }
+
             ZamniaTheme(activeThemeId = activeThemeId) {
                 val navController = rememberNavController()
-                
-                NavHost(
-                    navController = navController,
-                    startDestination = "splash"
-                ) {
-                    composable("splash") {
-                        val scope = androidx.compose.runtime.rememberCoroutineScope()
-                        
-                        // Start validation IMMEDIATELY when Splash composable enters the screen
-                        // This result will be ready by the time animation finishes.
-                        val validationResult = androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf<Boolean?>(null) }
-                        
-                        androidx.compose.runtime.LaunchedEffect(Unit) {
-                            validationResult.value = authViewModel.validateSession()
-                        }
+                val currentDestination = startDestination.value
 
-                        ZamniaSplashScreen(
-                            onSplashFinished = {
-                                scope.launch {
-                                    // If result is not ready (slow network), it will wait here briefly.
-                                    // If already ready, it navigates instantly.
-                                    while (validationResult.value == null) {
-                                        kotlinx.coroutines.delay(100)
+                if (currentDestination != null) {
+                    NavHost(
+                        navController = navController,
+                        startDestination = currentDestination
+                    ) {
+                        composable("onboarding") {
+                            ZamniaOnboardingScreen(
+                                onLoginSuccess = {
+                                    navController.navigate("dashboard") {
+                                        popUpTo("onboarding") { inclusive = true }
                                     }
-                                    
-                                    if (validationResult.value == true) {
-                                        navController.navigate("dashboard") {
-                                            popUpTo("splash") { inclusive = true }
-                                        }
-                                    } else {
-                                        navController.navigate("onboarding") {
-                                            popUpTo("splash") { inclusive = true }
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                    }
-                    composable("onboarding") {
-                        ZamniaOnboardingScreen(
-                            onLoginSuccess = {
-                                navController.navigate("dashboard") {
-                                    popUpTo("onboarding") { inclusive = true }
-                                }
-                            },
-                            viewModel = authViewModel
-                        )
-                    }
+                                },
+                                viewModel = authViewModel
+                            )
+                        }
                     composable("dashboard") {
                         ZamniaDashboardScreen(
                             onNavigateToWallet = { navController.navigate("wallet") },
@@ -207,6 +189,7 @@ class MainActivity : ComponentActivity() {
             }
         }
     }
+}
 
     private fun printAppSignature() {
         try {

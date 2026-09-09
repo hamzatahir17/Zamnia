@@ -149,21 +149,24 @@ class ZamniaRepository(
     }
 
     suspend fun saveUserProfile(user: User) {
+        val safeEmail = user.email.ifBlank { "guest@zamnia.com" }
+        val safeUser = user.copy(email = safeEmail)
+
         try {
-            supabase.saveUserProfile(user)
+            supabase.saveUserProfile(safeUser)
         } catch (e: Exception) {
             Log.w("ZamniaRepository", "saveUserProfile remote error: ${e.message}")
         }
 
         userDao.insertUser(
             UserEntity(
-                userId = user.uid,
-                publicId = user.userId,
-                name = user.displayName ?: user.email.substringBefore("@"),
-                email = user.email,
-                coins = user.coinBalance ?: 0L,
-                activeThemeId = user.activeThemeId ?: "default",
-                unlockedThemesCsv = user.unlockedThemes.ifEmpty { listOf("default") }.joinToString(",")
+                userId = safeUser.uid,
+                publicId = safeUser.userId,
+                name = safeUser.displayName.ifBlank { safeUser.email.substringBefore("@") },
+                email = safeUser.email,
+                coins = safeUser.coinBalance,
+                activeThemeId = safeUser.activeThemeId,
+                unlockedThemesCsv = safeUser.unlockedThemes.ifEmpty { listOf("default") }.joinToString(",")
             )
         )
     }
